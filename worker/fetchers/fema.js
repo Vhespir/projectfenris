@@ -7,28 +7,35 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 export async function fetchFEMA() {
   try {
     const res = await axios.get(
-      'https://www.fema.gov/api/open/v2/disasterDeclarationsSummaries?$top=50&$orderby=declarationDate desc'
+      'https://www.fema.gov/api/open/v2/disasterDeclarationsSummaries?$top=50&$orderby=declarationDate desc',
+      { timeout: 15000 }
     )
 
     const disasters = res.data.DisasterDeclarationsSummaries
+    let stored = 0
 
-    for (const disaster of disasters) {
-      await pool.query(`
+    for (const d of disasters) {
+      const externalId = String(d.disasterNumber)
+      const { rowCount } = await pool.query(`
         INSERT INTO disaster_events
-          (source, event_type, title, severity, geometry, properties, fetched_at)
-        VALUES
-          ($1, $2, $3, $4, NULL, $5, NOW())
-        ON CONFLICT DO NOTHING
+          (source, event_type, title, severity, geometry, properties,
+           external_id, starts_at)
+        VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
+        ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
       `, [
         'fema',
-        disaster.incidentType,
-        `${disaster.incidentType} - ${disaster.designatedArea}, ${disaster.state}`,
+        d.incidentType,
+        `${d.incidentType} - ${d.designatedArea}, ${d.state}`,
         'Severe',
-        JSON.stringify(disaster)
+        JSON.stringify(d),
+        externalId,
+        d.declarationDate || null,
       ])
+
+      stored += rowCount
     }
 
-    console.log(`FEMA: stored ${disasters.length} declarations`)
+    console.log(`FEMA: ${stored} new of ${disasters.length} declarations`)
   } catch (err) {
     console.error('FEMA fetch error:', err.message)
   }

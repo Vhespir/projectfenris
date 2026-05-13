@@ -7,10 +7,17 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - fenris-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   api:
     build:
@@ -23,7 +30,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3001
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     networks:
       - fenris-network
 
@@ -33,13 +41,13 @@ services:
       network: host
     container_name: fenris_worker
     restart: unless-stopped
+    network_mode: host
     environment:
-      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}
       AIRNOW_API_KEY: ${AIRNOW_API_KEY}
     depends_on:
-      - db
-    networks:
-      - fenris-network
+      db:
+        condition: service_healthy
 
   frontend:
     build:
