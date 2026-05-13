@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm install --include=dev --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 
 COPY . .
 

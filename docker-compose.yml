@@ -13,7 +13,9 @@ services:
       - fenris-network
 
   api:
-    build: ./api
+    build:
+      context: ./api
+      network: host
     container_name: fenris_api
     restart: unless-stopped
     environment:
@@ -26,7 +28,9 @@ services:
       - fenris-network
 
   worker:
-    build: ./worker
+    build:
+      context: ./worker
+      network: host
     container_name: fenris_worker
     restart: unless-stopped
     environment:
