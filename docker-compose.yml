@@ -38,7 +38,9 @@ services:
       - fenris-network
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      network: host
     container_name: fenris_frontend
     restart: unless-stopped
     networks:
