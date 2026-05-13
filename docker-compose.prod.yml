@@ -16,10 +16,13 @@ services:
     build: ./api
     container_name: fenris_api
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
     environment:
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3001
+      NODE_ENV: production
     depends_on:
       - db
     networks:
@@ -32,6 +35,7 @@ services:
     environment:
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
       AIRNOW_API_KEY: ${AIRNOW_API_KEY}
+      NODE_ENV: production
     depends_on:
       - db
     networks:
@@ -40,30 +44,11 @@ services:
   frontend:
     build:
       context: ./frontend
-      network: host
+      dockerfile: Dockerfile.prod
     container_name: fenris_frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
-    environment:
-      NODE_ENV: development
-    volumes:
-      - ./frontend/src:/app/src
-    networks:
-      - fenris-network
-
-  nginx:
-    image: nginx:alpine
-    container_name: fenris_nginx
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - frontend
-      - api
+      - "127.0.0.1:8080:80"
     networks:
       - fenris-network
 
