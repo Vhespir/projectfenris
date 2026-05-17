@@ -43,7 +43,7 @@ function Avatar({ url, username, size = 36 }: { url: string | null; username: st
 
 export default function Inbox() {
   const { username: partnerUsername } = useParams<{ username?: string }>()
-  const { user } = useAuth()
+  const { user, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
   const socket = useSocket()
@@ -80,13 +80,15 @@ export default function Inbox() {
   }, [])
 
   useEffect(() => {
+    if (authLoading) return
     if (!user) { navigate('/login'); return }
     loadConvos()
-  }, [user, loadConvos, navigate])
+  }, [authLoading, user, loadConvos, navigate])
 
   useEffect(() => {
-    if (partnerUsername && user) loadThread(partnerUsername)
-  }, [partnerUsername, loadThread, user])
+    if (authLoading || !user) return
+    if (partnerUsername) loadThread(partnerUsername)
+  }, [partnerUsername, loadThread, user, authLoading])
 
   useEffect(() => {
     if (threadRef.current) {
@@ -117,7 +119,7 @@ export default function Inbox() {
     return () => { socket.off('new_message', handler) }
   }, [socket, partnerUsername, loadThread, loadConvos])
 
-  if (!user) return null
+  if (authLoading || !user) return null
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
