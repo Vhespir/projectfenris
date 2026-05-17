@@ -403,19 +403,22 @@ interface FireLayerProps {
 
 export function FireLayer({ range = '24h' }: FireLayerProps) {
   const map = useMap()
+  const [paneReady, setPaneReady] = useState(false)
 
   useEffect(() => {
     if (!map.getPane('firmsPane')) {
-      map.createPane('firmsPane')
+      const pane = map.createPane('firmsPane')
+      pane.style.zIndex = '300'
+      pane.style.filter = [
+        'drop-shadow(0 0 2px rgba(255,80,0,1))',
+        'drop-shadow(0 0 5px rgba(255,140,0,0.8))',
+        'drop-shadow(0 0 10px rgba(255,60,0,0.5))',
+      ].join(' ')
     }
-    const pane = map.getPane('firmsPane')!
-    pane.style.zIndex = '300'
-    pane.style.filter = [
-      'drop-shadow(0 0 2px rgba(255,80,0,1))',
-      'drop-shadow(0 0 5px rgba(255,140,0,0.8))',
-      'drop-shadow(0 0 10px rgba(255,60,0,0.5))',
-    ].join(' ')
+    setPaneReady(true)
   }, [map])
+
+  if (!paneReady) return null
 
   return (
     <WMSTileLayer

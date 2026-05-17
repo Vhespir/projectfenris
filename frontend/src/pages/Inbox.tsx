@@ -57,11 +57,6 @@ export default function Inbox() {
   const threadRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  if (!user) {
-    navigate('/login')
-    return null
-  }
-
   const loadConvos = useCallback(async () => {
     try {
       const r = await fetch('/api/messages')
@@ -84,11 +79,14 @@ export default function Inbox() {
     ))
   }, [])
 
-  useEffect(() => { loadConvos() }, [loadConvos])
+  useEffect(() => {
+    if (!user) { navigate('/login'); return }
+    loadConvos()
+  }, [user, loadConvos, navigate])
 
   useEffect(() => {
-    if (partnerUsername) loadThread(partnerUsername)
-  }, [partnerUsername, loadThread])
+    if (partnerUsername && user) loadThread(partnerUsername)
+  }, [partnerUsername, loadThread, user])
 
   useEffect(() => {
     if (threadRef.current) {
@@ -118,6 +116,8 @@ export default function Inbox() {
     socket.on('new_message', handler)
     return () => { socket.off('new_message', handler) }
   }, [socket, partnerUsername, loadThread, loadConvos])
+
+  if (!user) return null
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
