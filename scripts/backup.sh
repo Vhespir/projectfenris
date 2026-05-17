@@ -10,7 +10,7 @@ set -euo pipefail
 CONTAINER="fenris_db"
 DB_NAME="${DB_NAME:-fenris}"
 DB_USER="${DB_USER:-fenris}"
-RCLONE_REMOTE="nexus-restic:fenris-backups"
+RCLONE_REMOTE="b2-fenris:nexus-restic/fenris-backups"
 KEEP_DAYS=30
 BACKUP_DIR="/tmp/fenris-backups"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
