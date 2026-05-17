@@ -402,6 +402,21 @@ interface FireLayerProps {
 }
 
 export function FireLayer({ range = '24h' }: FireLayerProps) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (!map.getPane('firmsPane')) {
+      map.createPane('firmsPane')
+    }
+    const pane = map.getPane('firmsPane')!
+    pane.style.zIndex = '300'
+    pane.style.filter = [
+      'drop-shadow(0 0 2px rgba(255,80,0,1))',
+      'drop-shadow(0 0 5px rgba(255,140,0,0.8))',
+      'drop-shadow(0 0 10px rgba(255,60,0,0.5))',
+    ].join(' ')
+  }, [map])
+
   return (
     <WMSTileLayer
       url={`https://firms.modaps.eosdis.nasa.gov/mapserver/wms/fires/${FIRMS_KEY}?`}
@@ -409,8 +424,9 @@ export function FireLayer({ range = '24h' }: FireLayerProps) {
       format="image/png"
       transparent={true}
       version="1.1.1"
-      opacity={0.85}
+      opacity={0.95}
       zIndex={300}
+      pane="firmsPane"
       attribution='<a href="https://firms.modaps.eosdis.nasa.gov">NASA FIRMS</a>'
     />
   )
@@ -639,55 +655,6 @@ export function EventLayer({ events, activeFilters, popups = true }: EventLayerP
       groupRef.current.addLayer(marker)
     }
   }, [events, activeFilters, map, popups])
-
-  return null
-}
-
-// ─── Wildfire Perimeters (NIFC) ───────────────────────────────────────────────
-
-export function WildfirePerimeterLayer() {
-  const map = useMap()
-  const layerRef = useRef<L.GeoJSON | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-
-    fetch('/api/external/perimeters', { signal: AbortSignal.timeout(30_000) })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (cancelled || !data?.features) return
-        if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null }
-
-        layerRef.current = L.geoJSON(data, {
-          style: () => ({
-            color: '#F97316',
-            weight: 1.5,
-            fillColor: '#EF4444',
-            fillOpacity: 0.22,
-            opacity: 0.75,
-          }),
-          onEachFeature: (f, layer) => {
-            const p = f.properties ?? {}
-            const name = esc(p.poly_IncidentName ?? 'Unknown Fire')
-            const acres = p.poly_GISAcres ? `${Math.round(p.poly_GISAcres).toLocaleString()} acres` : ''
-            const pct = p.attr_PercentContained != null ? `${p.attr_PercentContained}% contained` : ''
-            layer.bindPopup(`
-              <div style="font-family:'Space Grotesk',sans-serif;min-width:180px;background:#111111;color:#F4F4F5;border-radius:6px">
-                <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#F97316;margin-bottom:4px">NIFC · Wildfire Perimeter</div>
-                <div style="font-weight:600;font-size:14px;margin-bottom:6px">${name}</div>
-                <div style="font-size:12px;color:#A1A1AA">${[acres, pct].filter(Boolean).join(' · ')}</div>
-              </div>
-            `)
-          },
-        }).addTo(map)
-      })
-      .catch(() => {})
-
-    return () => {
-      cancelled = true
-      if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null }
-    }
-  }, [map])
 
   return null
 }

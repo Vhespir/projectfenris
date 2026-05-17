@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
-  EventLayer, RadarLayer, WeatherAlertLayer, AirTrafficLayer, FieldReportLayer, FireLayer, WildfirePerimeterLayer,
+  EventLayer, RadarLayer, WeatherAlertLayer, AirTrafficLayer, FieldReportLayer, FireLayer,
   type DisasterEvent, type AirTrafficFilters, type AltitudeBand, type FireTimeRange,
 } from '../components/MapEventLayer'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -18,7 +18,7 @@ const OVERLAYS = [
   { key: 'alerts',     label: 'Weather Alerts' },
   { key: 'traffic',    label: 'Air Traffic' },
   { key: 'fires',      label: 'Fires' },
-  { key: 'perimeters', label: 'Fire Perimeters' },
+
   { key: 'reports',    label: 'Field Reports' },
 ]
 
@@ -199,7 +199,7 @@ export default function MapPage() {
           {activeOverlays.has('alerts')  && <WeatherAlertLayer />}
           {trafficActive && <AirTrafficLayer filters={atFilters} onCount={setAtCount} />}
           {firesActive && <FireLayer range={fireRange} />}
-          {activeOverlays.has('perimeters') && <WildfirePerimeterLayer />}
+
           {activeOverlays.has('reports') && <FieldReportLayer />}
           <EventLayer events={events} activeFilters={activeFilters} />
         </MapContainer>

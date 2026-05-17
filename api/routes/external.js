@@ -199,31 +199,6 @@ export async function externalRoutes(app) {
     }
   })
 
-  // ── NIFC WFIGS wildfire perimeters (GeoJSON, fires > 500 acres) ─────────────
-  app.get('/external/perimeters', async (_req, reply) => {
-    try {
-      const data = await withCache('perimeters', 30 * 60_000, async () => {
-        const base = `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services` +
-          `/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query`
-        const params = new URLSearchParams({
-          where: 'poly_GISAcres > 500',
-          outFields: 'poly_IncidentName,poly_GISAcres,attr_PercentContained,poly_CreateDate',
-          f: 'geojson',
-          returnGeometry: 'true',
-        })
-        const res = await fetch(`${base}?${params}`, {
-          headers: H, signal: AbortSignal.timeout(30_000),
-        })
-        if (!res.ok) throw new Error(`NIFC WFIGS ${res.status}`)
-        return res.json()
-      })
-      reply.header('Content-Type', 'application/json')
-      return data
-    } catch (err) {
-      reply.code(503).send({ error: 'NIFC unavailable', detail: err.message })
-    }
-  })
-
   // ── Crypto prices (CoinGecko) ─────────────────────────────────────────────────
   app.get('/external/crypto', async (_req, reply) => {
     try {

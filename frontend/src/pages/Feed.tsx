@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
@@ -90,6 +90,16 @@ const SEVERITY_COLOR: Record<string, string> = {
 
 const SOURCE_LABEL: Record<string, string> = {
   noaa: 'NOAA', usgs: 'USGS', gdacs: 'GDACS', epa: 'EPA',
+}
+
+const CAT_COLOR: Record<string, string> = {
+  emergency: '#EF4444', health: '#EC4899', cybersecurity: '#3B82F6',
+  recall: '#F59E0B', travel: '#A78BFA', nuclear: '#22C55E',
+  hurricane: '#F97316', tsunami: '#06B6D4', wildfire: '#F97316',
+  preparedness: '#84CC16', environment: '#22C55E', news: '#6B7280',
+  geopolitical: '#8B5CF6', financial: '#10B981', security: '#EF4444',
+  comms: '#06B6D4', infrastructure: '#F59E0B', space_weather: '#FBBF24',
+  science: '#06B6D4',
 }
 
 function timeAgo(iso: string) {
@@ -257,12 +267,21 @@ function PostCard({ item }: { item: PostItem }) {
 
 const SOURCE_FILTERS = ['noaa', 'usgs', 'gdacs', 'epa'] as const
 const SEVERITY_LEVELS = ['Extreme', 'Severe', 'Moderate', 'Minor'] as const
-const NEWS_TIER2_SOURCES = ['NPR', 'PBS', 'Reuters', 'Sky News'] as const
 
-function SidebarLabel({ children }: { children: React.ReactNode }) {
+const SEVERITY_SCORE: Record<string, number> = {
+  Extreme: 4, Severe: 3, Moderate: 2, Minor: 1,
+}
+
+function severityScore(item: FeedItem): number {
+  if (item.kind === 'event') return SEVERITY_SCORE[item.severity] ?? 0
+  return 0
+}
+
+function SidebarLabel({ children, active }: { children: React.ReactNode; active?: boolean }) {
   return (
-    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', marginTop: '18px' }}>
-      {children}
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', marginTop: '18px' }}>
+      <span>{children}</span>
+      {active && <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: 'var(--color-accent)', flexShrink: 0 }} />}
     </div>
   )
 }
@@ -305,9 +324,14 @@ export default function FeedPage() {
   const [activeSeverities, setActiveSeverities] = useState<Set<string>>(new Set())
   const [activeEventTypes, setActiveEventTypes] = useState<Set<string>>(new Set())
   const [activeNewsCategories, setActiveNewsCategories] = useState<Set<string>>(new Set())
-  const [hiddenNewsSources, setHiddenNewsSources] = useState<Set<string>>(new Set())
+  const [activeNewsSources, setActiveNewsSources] = useState<Set<string>>(new Set())
   const [keywordFilterOn, setKeywordFilterOn] = useState(false)
   const [kwInput, setKwInput] = useState('')
+  const [sortBy, setSortBy] = useState<'newest' | 'severity'>('newest')
+  const [eventTypesExpanded, setEventTypesExpanded] = useState(false)
+  const [newsSourcesExpanded, setNewsSourcesExpanded] = useState(false)
+  const [displayCount, setDisplayCount] = useState(30)
+  const sentinelRef = useRef<HTMLDivElement>(null)
   const initKeywords = ((user?.preferences as Record<string, unknown> | undefined)?.feed as { keywords?: string[] } | undefined)?.keywords ?? []
   const [savedKeywords, setSavedKeywords] = useState<string[]>(initKeywords)
 
@@ -319,7 +343,7 @@ export default function FeedPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/events?sources=noaa,usgs,gdacs,epa&limit=500').then(r => r.json()),
-      fetch('/api/news?limit=100').then(r => r.json()),
+      fetch('/api/news?limit=200').then(r => r.json()),
       fetch('/api/posts?limit=200').then(r => r.json()),
     ]).then(([evts, nws, psts]) => {
       setEvents(Array.isArray(evts) ? evts : [])
@@ -353,7 +377,18 @@ export default function FeedPage() {
     return Array.from(cats).sort()
   }, [news])
 
-const combined: FeedItem[] = useMemo(() => [
+  const allNewsSources = useMemo(() =>
+    Array.from(
+      news.reduce((m, n) => m.set(n.source, (m.get(n.source) ?? 0) + 1), new Map<string, number>())
+    ).sort((a, b) => b[1] - a[1]),
+  [news])
+
+  const activeFilterCount =
+    (!showEvents ? 1 : 0) + (!showNews ? 1 : 0) + (!showFieldReports ? 1 : 0) + (!showCommunityReports ? 1 : 0) +
+    activeSources.size + activeSeverities.size + activeEventTypes.size +
+    activeNewsSources.size + activeNewsCategories.size + (keywordFilterOn ? 1 : 0)
+
+  const combined: FeedItem[] = useMemo(() => [
     ...events.map(e => ({ kind: 'event' as const, ...e })),
     ...news.map(n => ({ kind: 'news' as const, ...n })),
     ...posts.map(p => ({ kind: 'post' as const, ...p })),
@@ -363,39 +398,78 @@ const combined: FeedItem[] = useMemo(() => [
     return new Date(dateB).getTime() - new Date(dateA).getTime()
   }), [events, news, posts])
 
-  const filtered = useMemo(() => combined.filter(item => {
-    if (item.kind === 'event') {
-      if (!showEvents) return false
-      if (activeSources.size > 0 && !activeSources.has(item.source)) return false
-      if (activeSeverities.size > 0 && !activeSeverities.has(item.severity)) return false
-      if (activeEventTypes.size > 0 && !activeEventTypes.has(item.event_type)) return false
-      if (hasLocation && nearMe && user?.user_lat && user?.user_lon) {
-        const centroid = eventCentroid(item.geometry)
-        if (!centroid) return false
-        if (haversine(user.user_lat, user.user_lon, centroid[0], centroid[1]) > nearMeKm) return false
+  const filtered = useMemo(() => {
+    const base = combined.filter(item => {
+      if (item.kind === 'event') {
+        if (!showEvents) return false
+        if (activeSources.size > 0 && !activeSources.has(item.source)) return false
+        if (activeSeverities.size > 0 && !activeSeverities.has(item.severity)) return false
+        if (activeEventTypes.size > 0 && !activeEventTypes.has(item.event_type)) return false
+        if (hasLocation && nearMe && user?.user_lat && user?.user_lon) {
+          const centroid = eventCentroid(item.geometry)
+          if (!centroid) return false
+          if (haversine(user.user_lat, user.user_lon, centroid[0], centroid[1]) > nearMeKm) return false
+        }
       }
+      if (item.kind === 'news') {
+        if (!showNews) return false
+        if (activeNewsSources.size > 0 && !activeNewsSources.has(item.source)) return false
+        if (item.category && activeNewsCategories.size > 0 && !activeNewsCategories.has(item.category)) return false
+      }
+      if (item.kind === 'post') {
+        if (item.post_type === 'field_report' && !showFieldReports) return false
+        if (item.post_type === 'self_reported_news' && !showCommunityReports) return false
+      }
+      if (keywordFilterOn && savedKeywords.length > 0) {
+        let text = ''
+        if (item.kind === 'event') text = `${item.title} ${item.event_type} ${(item.properties as Record<string, string>).areaDesc ?? ''}`
+        else if (item.kind === 'news') text = `${item.title} ${item.summary ?? ''} ${item.category ?? ''}`
+        else text = `${item.title} ${item.body}`
+        const lower = text.toLowerCase()
+        if (!savedKeywords.some(kw => lower.includes(kw))) return false
+      }
+      return true
+    })
+
+    if (sortBy === 'severity') {
+      return [...base].sort((a, b) => {
+        const diff = severityScore(b) - severityScore(a)
+        if (diff !== 0) return diff
+        const dateA = a.kind === 'event' ? a.fetched_at : a.kind === 'news' ? (a.published_at ?? '') : a.created_at
+        const dateB = b.kind === 'event' ? b.fetched_at : b.kind === 'news' ? (b.published_at ?? '') : b.created_at
+        return new Date(dateB).getTime() - new Date(dateA).getTime()
+      })
     }
-    if (item.kind === 'news') {
-      if (!showNews) return false
-      if (hiddenNewsSources.has(item.source)) return false
-      if (item.category && activeNewsCategories.size > 0 && !activeNewsCategories.has(item.category)) return false
-    }
-    if (item.kind === 'post') {
-      if (item.post_type === 'field_report' && !showFieldReports) return false
-      if (item.post_type === 'self_reported_news' && !showCommunityReports) return false
-    }
-    if (keywordFilterOn && savedKeywords.length > 0) {
-      let text = ''
-      if (item.kind === 'event') text = `${item.title} ${item.event_type} ${(item.properties as Record<string, string>).areaDesc ?? ''}`
-      else if (item.kind === 'news') text = `${item.title} ${item.summary ?? ''} ${item.category ?? ''}`
-      else text = `${item.title} ${item.body}`
-      const lower = text.toLowerCase()
-      if (!savedKeywords.some(kw => lower.includes(kw))) return false
-    }
-    return true
-  }), [combined, showEvents, showNews, showFieldReports, showCommunityReports, activeSources, activeSeverities, activeEventTypes, activeNewsCategories, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords])
+    return base
+  }, [combined, showEvents, showNews, showFieldReports, showCommunityReports, activeSources, activeSeverities, activeEventTypes, activeNewsCategories, activeNewsSources, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords, sortBy])
 
   const severeCounts = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
+
+  const filterSignature = useMemo(() =>
+    [showEvents, showNews, showFieldReports, showCommunityReports, sortBy,
+     [...activeSources].sort().join(), [...activeSeverities].sort().join(),
+     [...activeEventTypes].sort().join(), [...activeNewsSources].sort().join(),
+     [...activeNewsCategories].sort().join(), nearMe, nearMeKm, keywordFilterOn,
+     savedKeywords.join()
+    ].join('|'),
+    [showEvents, showNews, showFieldReports, showCommunityReports, sortBy, activeSources, activeSeverities, activeEventTypes, activeNewsSources, activeNewsCategories, nearMe, nearMeKm, keywordFilterOn, savedKeywords]
+  )
+
+  useEffect(() => { setDisplayCount(30) }, [filterSignature])
+
+  const hasMore = displayCount < filtered.length
+
+  useEffect(() => {
+    if (!hasMore) return
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setDisplayCount(n => n + 30) },
+      { rootMargin: '400px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, displayCount])
 
   async function saveKeywords(kws: string[]) {
     if (!user) return
@@ -430,16 +504,48 @@ const combined: FeedItem[] = useMemo(() => [
     setActiveSeverities(new Set())
     setActiveEventTypes(new Set())
     setActiveNewsCategories(new Set())
-    setHiddenNewsSources(new Set())
+    setActiveNewsSources(new Set())
     setKeywordFilterOn(false)
+    setSortBy('newest')
   }
 
   const locationLabel = [user?.region_county, user?.region_state].filter(Boolean).join(', ')
+
+  const visibleEventTypes = eventTypesExpanded ? eventTypes : eventTypes.slice(0, 6)
+  const visibleNewsSources = newsSourcesExpanded ? allNewsSources : allNewsSources.slice(0, 8)
 
   const filterContent = (
     <>
       <div style={{ fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 600, color: 'var(--color-muted)', letterSpacing: '0.04em', marginBottom: '12px' }}>
         Filters
+      </div>
+
+      <SidebarLabel>Content</SidebarLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <FilterBtn active={showEvents} onClick={() => setShowEvents(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Events</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{events.length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showNews} onClick={() => setShowNews(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>News</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{news.length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showFieldReports} color="#F59E0B" onClick={() => setShowFieldReports(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Field Reports</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'field_report').length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showCommunityReports} color="#3B82F6" onClick={() => setShowCommunityReports(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Community Reports</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'self_reported_news').length}</span>
+          </span>
+        </FilterBtn>
       </div>
 
       {hasLocation && (
@@ -480,49 +586,9 @@ const combined: FeedItem[] = useMemo(() => [
         </>
       )}
 
-      <SidebarLabel>Content</SidebarLabel>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        <FilterBtn active={showEvents} onClick={() => setShowEvents(v => !v)}>
-          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Events</span>
-            <span style={{ color: 'var(--color-subtle)' }}>{events.length}</span>
-          </span>
-        </FilterBtn>
-        <FilterBtn active={showNews} onClick={() => setShowNews(v => !v)}>
-          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>News</span>
-            <span style={{ color: 'var(--color-subtle)' }}>{news.length}</span>
-          </span>
-        </FilterBtn>
-        <FilterBtn active={showFieldReports} color="#F59E0B" onClick={() => setShowFieldReports(v => !v)}>
-          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Field Reports</span>
-            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'field_report').length}</span>
-          </span>
-        </FilterBtn>
-        <FilterBtn active={showCommunityReports} color="#3B82F6" onClick={() => setShowCommunityReports(v => !v)}>
-          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span>Community Reports</span>
-            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'self_reported_news').length}</span>
-          </span>
-        </FilterBtn>
-      </div>
-
       {showEvents && (
         <>
-          <SidebarLabel>Source</SidebarLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {SOURCE_FILTERS.map(src => (
-              <FilterBtn key={src} active={activeSources.has(src)} onClick={() => setActiveSources(s => toggle(s, src))}>
-                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{SOURCE_LABEL[src]}</span>
-                  <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.source === src).length}</span>
-                </span>
-              </FilterBtn>
-            ))}
-          </div>
-
-          <SidebarLabel>Severity</SidebarLabel>
+          <SidebarLabel active={activeSeverities.size > 0}>Severity</SidebarLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {SEVERITY_LEVELS.map(s => {
               const c = s === 'Extreme' || s === 'Severe' ? '#EF4444' : s === 'Moderate' ? '#F59E0B' : '#22C55E'
@@ -537,11 +603,23 @@ const combined: FeedItem[] = useMemo(() => [
             })}
           </div>
 
+          <SidebarLabel active={activeSources.size > 0}>Event Sources</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {SOURCE_FILTERS.map(src => (
+              <FilterBtn key={src} active={activeSources.has(src)} onClick={() => setActiveSources(s => toggle(s, src))}>
+                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{SOURCE_LABEL[src]}</span>
+                  <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.source === src).length}</span>
+                </span>
+              </FilterBtn>
+            ))}
+          </div>
+
           {eventTypes.length > 0 && (
             <>
-              <SidebarLabel>Event Type</SidebarLabel>
+              <SidebarLabel active={activeEventTypes.size > 0}>Event Types</SidebarLabel>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                {eventTypes.map(type => (
+                {visibleEventTypes.map(type => (
                   <FilterBtn key={type} active={activeEventTypes.has(type)} onClick={() => setActiveEventTypes(s => toggle(s, type))}>
                     <span style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ textTransform: 'capitalize' }}>{type.replace(/_/g, ' ')}</span>
@@ -550,6 +628,15 @@ const combined: FeedItem[] = useMemo(() => [
                   </FilterBtn>
                 ))}
               </div>
+              {eventTypes.length > 6 && (
+                <button onClick={() => setEventTypesExpanded(v => !v)} style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '3px 10px',
+                  fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)',
+                  textAlign: 'left', width: '100%',
+                }}>
+                  {eventTypesExpanded ? 'show less' : `show ${eventTypes.length - 6} more`}
+                </button>
+              )}
             </>
           )}
         </>
@@ -557,44 +644,61 @@ const combined: FeedItem[] = useMemo(() => [
 
       {showNews && (
         <>
-          <SidebarLabel>News Source</SidebarLabel>
+          <SidebarLabel active={activeNewsSources.size > 0}>News Sources</SidebarLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {NEWS_TIER2_SOURCES.map(src => {
-              const count = news.filter(n => n.source === src).length
-              if (count === 0) return null
-              const hidden = hiddenNewsSources.has(src)
+            {visibleNewsSources.map(([src, count]) => (
+              <FilterBtn key={src} active={activeNewsSources.has(src)} onClick={() => setActiveNewsSources(s => toggle(s, src))}>
+                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{src}</span>
+                  <span style={{ color: 'var(--color-subtle)' }}>{count}</span>
+                </span>
+              </FilterBtn>
+            ))}
+          </div>
+          {allNewsSources.length > 8 && (
+            <button onClick={() => setNewsSourcesExpanded(v => !v)} style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: '3px 10px',
+              fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)',
+              textAlign: 'left', width: '100%',
+            }}>
+              {newsSourcesExpanded ? 'show less' : `show ${allNewsSources.length - 8} more`}
+            </button>
+          )}
+        </>
+      )}
+
+      {showNews && newsCategories.length > 0 && (
+        <>
+          <SidebarLabel active={activeNewsCategories.size > 0}>Category</SidebarLabel>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+            {newsCategories.map(cat => {
+              const isActive = activeNewsCategories.has(cat)
+              const catColor = CAT_COLOR[cat] ?? '#6B7280'
               return (
-                <FilterBtn key={src} active={!hidden} onClick={() => setHiddenNewsSources(s => toggle(s, src))}>
-                  <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>{src}</span>
-                    <span style={{ color: 'var(--color-subtle)' }}>{count}</span>
-                  </span>
-                </FilterBtn>
+                <button
+                  key={cat}
+                  onClick={() => setActiveNewsCategories(s => toggle(s, cat))}
+                  style={{
+                    padding: '3px 8px', borderRadius: '12px', fontSize: '10px',
+                    fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                    border: `1px solid ${isActive ? catColor + '80' : 'var(--color-border)'}`,
+                    background: isActive ? catColor + '22' : 'transparent',
+                    color: isActive ? catColor : 'var(--color-subtle)',
+                    transition: 'all 0.15s',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {cat.replace(/_/g, ' ')}
+                </button>
               )
             })}
           </div>
         </>
       )}
 
-      {showNews && newsCategories.length > 0 && (
-        <>
-          <SidebarLabel>News Category</SidebarLabel>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {newsCategories.map(cat => (
-              <FilterBtn key={cat} active={activeNewsCategories.has(cat)} onClick={() => setActiveNewsCategories(s => toggle(s, cat))}>
-                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ textTransform: 'capitalize' }}>{cat}</span>
-                  <span style={{ color: 'var(--color-subtle)' }}>{news.filter(n => n.category === cat).length}</span>
-                </span>
-              </FilterBtn>
-            ))}
-          </div>
-        </>
-      )}
-
       {user && (
         <>
-          <SidebarLabel>Keywords</SidebarLabel>
+          <SidebarLabel active={keywordFilterOn}>Keywords</SidebarLabel>
           {savedKeywords.length > 0 && (
             <FilterBtn active={keywordFilterOn} onClick={() => setKeywordFilterOn(v => !v)}>
               <span style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -687,8 +791,36 @@ const combined: FeedItem[] = useMemo(() => [
             </span>
           )}
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>
-            {loading ? '...' : `${filtered.length} items`}
+            {loading ? '...' : `${Math.min(displayCount, filtered.length)} of ${filtered.length}`}
           </span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            <button
+              onClick={() => setSortBy('newest')}
+              style={{
+                padding: '3px 10px', borderRadius: '4px', fontSize: '10px',
+                fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                border: `1px solid ${sortBy === 'newest' ? 'var(--color-accent)60' : 'var(--color-border)'}`,
+                background: sortBy === 'newest' ? 'var(--color-accent)14' : 'transparent',
+                color: sortBy === 'newest' ? 'var(--color-accent)' : 'var(--color-subtle)',
+                transition: 'all 0.15s',
+              }}
+            >
+              Newest
+            </button>
+            <button
+              onClick={() => setSortBy('severity')}
+              style={{
+                padding: '3px 10px', borderRadius: '4px', fontSize: '10px',
+                fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                border: `1px solid ${sortBy === 'severity' ? '#EF444460' : 'var(--color-border)'}`,
+                background: sortBy === 'severity' ? '#EF444414' : 'transparent',
+                color: sortBy === 'severity' ? '#EF4444' : 'var(--color-subtle)',
+                transition: 'all 0.15s',
+              }}
+            >
+              Severity
+            </button>
+          </div>
           {isMobile && (
             <button
               onClick={() => setShowFilters(v => !v)}
@@ -698,9 +830,20 @@ const combined: FeedItem[] = useMemo(() => [
                 border: '1px solid var(--color-border)',
                 background: showFilters ? 'var(--color-surface)' : 'transparent',
                 color: showFilters ? 'var(--color-text)' : 'var(--color-muted)',
+                display: 'inline-flex', alignItems: 'center', gap: '6px',
               }}
             >
-              {showFilters ? 'Hide Filters' : 'Filters'}
+              <span>{showFilters ? 'Hide Filters' : 'Filters'}</span>
+              {activeFilterCount > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: '16px', height: '16px', borderRadius: '50%',
+                  background: 'var(--color-accent)', color: '#0A0A0A',
+                  fontSize: '9px', fontFamily: 'var(--font-mono)', fontWeight: 700, flexShrink: 0,
+                }}>
+                  {activeFilterCount}
+                </span>
+              )}
             </button>
           )}
         </div>
@@ -721,7 +864,7 @@ const combined: FeedItem[] = useMemo(() => [
               setLoading(true)
               Promise.all([
                 fetch('/api/events?sources=noaa,usgs,gdacs,epa&limit=500').then(r => r.json()),
-                fetch('/api/news?limit=100').then(r => r.json()),
+                fetch('/api/news?limit=200').then(r => r.json()),
                 fetch('/api/posts?limit=200').then(r => r.json()),
               ]).then(([evts, nws, psts]) => {
                 setEvents(Array.isArray(evts) ? evts : [])
@@ -743,7 +886,7 @@ const combined: FeedItem[] = useMemo(() => [
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {filtered.map(item =>
+          {filtered.slice(0, displayCount).map(item =>
             item.kind === 'event'
               ? <EventCard key={`e-${item.id}`} item={item} />
               : item.kind === 'post'
@@ -753,6 +896,18 @@ const combined: FeedItem[] = useMemo(() => [
           {!loading && filtered.length === 0 && (
             <div style={{ color: 'var(--color-muted)', textAlign: 'center', padding: '60px 0', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
               No items match the current filters
+            </div>
+          )}
+          {hasMore && (
+            <div ref={sentinelRef} style={{ padding: '24px 0', textAlign: 'center' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', letterSpacing: '0.05em' }}>
+                loading more...
+              </span>
+            </div>
+          )}
+          {!hasMore && filtered.length > 30 && !loading && (
+            <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', letterSpacing: '0.05em' }}>
+              all {filtered.length} items loaded
             </div>
           )}
         </div>
