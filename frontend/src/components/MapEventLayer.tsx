@@ -668,9 +668,9 @@ export function WildfirePerimeterLayer() {
           }),
           onEachFeature: (f, layer) => {
             const p = f.properties ?? {}
-            const name = esc(p.IncidentName ?? 'Unknown Fire')
-            const acres = p.GISAcres ? `${Math.round(p.GISAcres).toLocaleString()} acres` : ''
-            const pct = p.PercentContained != null ? `${p.PercentContained}% contained` : ''
+            const name = esc(p.poly_IncidentName ?? 'Unknown Fire')
+            const acres = p.poly_GISAcres ? `${Math.round(p.poly_GISAcres).toLocaleString()} acres` : ''
+            const pct = p.attr_PercentContained != null ? `${p.attr_PercentContained}% contained` : ''
             layer.bindPopup(`
               <div style="font-family:'Space Grotesk',sans-serif;min-width:180px;background:#111111;color:#F4F4F5;border-radius:6px">
                 <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#F97316;margin-bottom:4px">NIFC · Wildfire Perimeter</div>

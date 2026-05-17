@@ -12,30 +12,33 @@ async function withCache(key, ttlMs, fn) {
 }
 
 function parseNRCText(text) {
-  const lines = text.split('\n')
-  const dateMatch = text.match(/(\d{1,2}\/\d{1,2}\/\d{4})/)
-  const reportDate = dateMatch ? dateMatch[0] : null
-  const reactors = []
-  let inData = false
-
-  for (const raw of lines) {
-    const line = raw.trim()
-    if (!line) continue
-    if (/^-{5,}/.test(line)) { inData = true; continue }
-    if (!inData) continue
-    // Match: Name ... STATE  UNIT  POWER  [status text]
-    const m = line.match(/^(.+?)\s{2,}([A-Z]{2})\s+(\d)\s+(\d{1,3})\s*(.*?)$/)
-    if (m) {
-      reactors.push({
-        name: m[1].trim(),
-        state: m[2],
-        unit: parseInt(m[3]),
-        power: parseInt(m[4]),
-        status: m[5].trim() || null,
-      })
-    }
+  // Format: ReportDt|Unit|Power  (pipe-delimited, 365 days of data)
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean).slice(1)
+  const byDate = {}
+  for (const line of lines) {
+    const parts = line.split('|')
+    if (parts.length < 3) continue
+    const dateStr = parts[0].split(' ')[0]
+    const unitName = parts[1].trim()
+    const power = parseInt(parts[2].trim(), 10)
+    if (isNaN(power)) continue
+    if (!byDate[dateStr]) byDate[dateStr] = []
+    byDate[dateStr].push({ unitName, power })
   }
-  return { reportDate, total: reactors.length, reactors }
+  const dates = Object.keys(byDate).sort((a, b) => new Date(b) - new Date(a))
+  if (!dates.length) return { reportDate: null, total: 0, reactors: [] }
+  const latestDate = dates[0]
+  const reactors = byDate[latestDate].map(r => {
+    const unitMatch = r.unitName.match(/\s(\d+)$/)
+    return {
+      name: unitMatch ? r.unitName.slice(0, -unitMatch[0].length).trim() : r.unitName,
+      state: '',
+      unit: unitMatch ? parseInt(unitMatch[1]) : null,
+      power: r.power,
+      status: null,
+    }
+  })
+  return { reportDate: latestDate, total: reactors.length, reactors }
 }
 
 export async function externalRoutes(app) {
@@ -181,7 +184,7 @@ export async function externalRoutes(app) {
   app.get('/external/nrc', async (_req, reply) => {
     try {
       const data = await withCache('nrc', 2 * 60 * 60_000, async () => {
-        const url = `https://www.nrc.gov/reading-rm/doc-collections/event-status/reactor-status/powerreactor.txt`
+        const url = `https://www.nrc.gov/reading-rm/doc-collections/event-status/reactor-status/PowerReactorStatusForLast365Days.txt`
         const res = await fetch(url, {
           headers: { ...H, Accept: 'text/plain' },
           signal: AbortSignal.timeout(15_000),
@@ -196,21 +199,22 @@ export async function externalRoutes(app) {
     }
   })
 
-  // ── NIFC wildfire perimeters (GeoJSON, fires > 1000 acres) ───────────────────
+  // ── NIFC WFIGS wildfire perimeters (GeoJSON, fires > 500 acres) ─────────────
   app.get('/external/perimeters', async (_req, reply) => {
     try {
       const data = await withCache('perimeters', 30 * 60_000, async () => {
         const base = `https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services` +
-          `/Current_WildlandFire_Perimeters/FeatureServer/0/query`
+          `/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query`
         const params = new URLSearchParams({
-          where: 'GISAcres > 1000',
-          outFields: 'IncidentName,GISAcres,PercentContained,CreateDate',
+          where: 'poly_GISAcres > 500',
+          outFields: 'poly_IncidentName,poly_GISAcres,attr_PercentContained,poly_CreateDate',
           f: 'geojson',
+          returnGeometry: 'true',
         })
         const res = await fetch(`${base}?${params}`, {
           headers: H, signal: AbortSignal.timeout(30_000),
         })
-        if (!res.ok) throw new Error(`NIFC ${res.status}`)
+        if (!res.ok) throw new Error(`NIFC WFIGS ${res.status}`)
         return res.json()
       })
       reply.header('Content-Type', 'application/json')
@@ -276,26 +280,31 @@ export async function externalRoutes(app) {
     }
   })
 
-  // ── Drought Monitor (national statistics) ─────────────────────────────────────
+  // ── Drought Monitor (national statistics, CSV endpoint) ──────────────────────
   app.get('/external/drought', async (_req, reply) => {
     try {
       const data = await withCache('drought', 24 * 60 * 60_000, async () => {
         const today = new Date().toISOString().slice(0, 10)
-        const past  = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10)
-        const url = `https://droughtmonitor.unl.edu/api/statisticsdata/nationstatisticsdata/${past}/${today}/1/json/`
+        const url = `https://droughtmonitor.unl.edu/DmData/GISData.aspx?mode=csv&aoi=us&date=${today}`
         const res = await fetch(url, { headers: H, signal: AbortSignal.timeout(20_000) })
         if (!res.ok) throw new Error(`DroughtMonitor ${res.status}`)
-        const json = await res.json()
-        if (!Array.isArray(json) || !json.length) throw new Error('empty')
-        const latest = json.sort((a, b) => b.MapDate.localeCompare(a.MapDate))[0]
+        const text = await res.text()
+        const lines = text.trim().split('\n').filter(l => !l.startsWith('MapDate'))
+        const conus = lines.find(l => l.includes(',CONUS,')) || lines[0]
+        if (!conus) throw new Error('no data')
+        const parts = conus.split(',')
+        const rawDate = parts[0].trim()
+        const dateStr = rawDate.length === 8
+          ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6, 8)}`
+          : rawDate
         return {
-          date: latest.MapDate,
-          none: latest.None,
-          d0: latest.D0,
-          d1: latest.D1,
-          d2: latest.D2,
-          d3: latest.D3,
-          d4: latest.D4,
+          date: dateStr,
+          none: parseFloat(parts[2]),
+          d0:   parseFloat(parts[3]),
+          d1:   parseFloat(parts[4]),
+          d2:   parseFloat(parts[5]),
+          d3:   parseFloat(parts[6]),
+          d4:   parseFloat(parts[7]),
         }
       })
       return data
@@ -304,33 +313,6 @@ export async function externalRoutes(app) {
     }
   })
 
-  // ── Radiation monitoring (Radmon.org community network) ──────────────────────
-  app.get('/external/radiation', async (_req, reply) => {
-    try {
-      const data = await withCache('radiation', 10 * 60_000, async () => {
-        const url = `https://www.radmon.org/radmon.php?task=getjson&user=guest&passwd=guest&limit=100`
-        const res = await fetch(url, { headers: H, signal: AbortSignal.timeout(15_000) })
-        if (!res.ok) throw new Error(`Radmon ${res.status}`)
-        const json = await res.json()
-        const stations = Array.isArray(json) ? json : []
-        const valid = stations.filter(s => s.cpm != null && s.cpm > 0 && s.cpm < 10000)
-        const avgCpm = valid.length ? valid.reduce((s, r) => s + r.cpm, 0) / valid.length : null
-        const elevated = valid.filter(s => s.cpm > 100)
-        return {
-          station_count: valid.length,
-          avg_cpm: avgCpm ? Math.round(avgCpm * 10) / 10 : null,
-          elevated_count: elevated.length,
-          stations: valid.slice(0, 5).map(s => ({
-            user: s.user, cpm: s.cpm, uSv: s.uSv,
-            lat: s.lat, lon: s.lon,
-          })),
-        }
-      })
-      return data
-    } catch (err) {
-      reply.code(503).send({ error: 'radiation unavailable', detail: err.message })
-    }
-  })
 
   // ── NASA Near Earth Objects ───────────────────────────────────────────────────
   app.get('/external/neo', async (_req, reply) => {

@@ -593,6 +593,20 @@ function TopGuidesContent() {
 interface MetalsData { gold: { price: number; change_pct: number }; silver: { price: number; change_pct: number } }
 interface OilData { price: number; change_pct: number | null; period: string; unit: string }
 
+function PriceRow({ label, price, changePct, fmt }: { label: string; price: number; changePct: number | null; fmt: (n: number) => string }) {
+  const color = changePct == null ? 'var(--color-muted)' : changePct >= 0 ? '#22C55E' : '#EF4444'
+  const sign  = changePct != null && changePct >= 0 ? '+' : ''
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '52px', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>{fmt(price)}</span>
+      {changePct != null && (
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color, fontWeight: 600 }}>{sign}{changePct.toFixed(2)}%</span>
+      )}
+    </div>
+  )
+}
+
 function MarketsContent() {
   const [metals, setMetals] = useState<MetalsData | null>(null)
   const [oil, setOil] = useState<OilData | null>(null)
@@ -612,25 +626,15 @@ function MarketsContent() {
   if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
   if (!metals && !oil) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
 
-  function PriceRow({ label, price, changePct, fmt }: { label: string; price: number; changePct: number | null; fmt: (n: number) => string }) {
-    const color = changePct == null ? 'var(--color-muted)' : changePct >= 0 ? '#22C55E' : '#EF4444'
-    const sign  = changePct != null && changePct >= 0 ? '+' : ''
-    return (
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '52px', flexShrink: 0 }}>{label}</span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>{fmt(price)}</span>
-        {changePct != null && (
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color, fontWeight: 600 }}>{sign}{changePct.toFixed(2)}%</span>
-        )}
-      </div>
-    )
-  }
+  const goldPrice   = metals?.gold?.price   != null ? Number(metals.gold.price)   : null
+  const silverPrice = metals?.silver?.price != null ? Number(metals.silver.price) : null
+  const oilPrice    = oil?.price            != null ? Number(oil.price)            : null
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {metals?.gold  && <PriceRow label="Gold"   price={metals.gold.price}   changePct={metals.gold.change_pct}   fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
-      {metals?.silver && <PriceRow label="Silver" price={metals.silver.price} changePct={metals.silver.change_pct} fmt={n => `$${n.toFixed(2)}`} />}
-      {oil && <PriceRow label="WTI" price={oil.price} changePct={oil.change_pct} fmt={n => `$${n.toFixed(2)}`} />}
+      {goldPrice   != null && <PriceRow label="Gold"   price={goldPrice}   changePct={metals!.gold.change_pct   ?? null} fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
+      {silverPrice != null && <PriceRow label="Silver" price={silverPrice} changePct={metals!.silver.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} />}
+      {oilPrice    != null && <PriceRow label="WTI"    price={oilPrice}    changePct={oil!.change_pct           ?? null} fmt={n => `$${n.toFixed(2)}`} />}
       <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
         Gold/Silver: GoldPrice.org{oil?.period ? ` · WTI: ${oil.period} · EIA` : ''}
       </div>
@@ -772,7 +776,7 @@ function SpaceWeatherContent() {
 
 // ─── Widget: Reactor Status ───────────────────────────────────────────────────
 
-interface Reactor { name: string; state: string; unit: number; power: number; status: string | null }
+interface Reactor { name: string; state: string | null; unit: number | null; power: number; status: string | null }
 
 function ReactorStatusContent() {
   const [data, setData] = useState<{ reportDate: string | null; total: number; reactors: Reactor[] } | null>(null)
@@ -815,8 +819,8 @@ function ReactorStatusContent() {
                 <div style={{ height: '100%', width: `${r.power}%`, background: r.power === 0 ? '#EF4444' : '#F59E0B', borderRadius: '2px' }} />
               </div>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: r.power === 0 ? '#EF4444' : '#F59E0B', width: '36px', flexShrink: 0 }}>{r.power}%</span>
-              <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name} {r.unit}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{r.state}</span>
+              <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}{r.unit != null ? ` ${r.unit}` : ''}</span>
+              {r.state ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{r.state}</span> : null}
             </div>
           ))}
         </div>
@@ -960,51 +964,7 @@ function DroughtContent() {
   )
 }
 
-// ─── Widget: Radiation Monitoring ────────────────────────────────────────────
 
-function RadiationContent() {
-  const [data, setData] = useState<{ station_count: number; avg_cpm: number | null; elevated_count: number } | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/external/radiation')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [])
-
-  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
-  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
-
-  const status = data.elevated_count > 5 ? 'ELEVATED' : data.elevated_count > 0 ? 'WATCH' : 'NORMAL'
-  const statusColor = data.elevated_count > 5 ? '#EF4444' : data.elevated_count > 0 ? '#F59E0B' : '#22C55E'
-
-  return (
-    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: statusColor, lineHeight: 1 }}>{status}</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Global Status</div>
-        </div>
-        {data.avg_cpm != null && (
-          <div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '22px', fontWeight: 700, color: 'var(--color-muted)', lineHeight: 1 }}>{data.avg_cpm}</div>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Avg CPM</div>
-          </div>
-        )}
-        <div style={{ marginLeft: 'auto' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-muted)', textAlign: 'right' }}>{data.station_count} stations</div>
-          {data.elevated_count > 0 && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#F59E0B', textAlign: 'right' }}>{data.elevated_count} elevated</div>
-          )}
-        </div>
-      </div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
-        Radmon.org community radiation network · CPM varies by detector type
-      </div>
-    </div>
-  )
-}
 
 // ─── Widget: Near Earth Objects ───────────────────────────────────────────────
 
@@ -1203,7 +1163,7 @@ const WIDGET_DEFS: WidgetDef[] = [
   { id: 'recalls',            label: 'Active Recalls',      description: 'Recent FDA and USDA food and drug recall alerts',            defaultWidth: 'half' },
   { id: 'crypto',             label: 'Crypto',              description: 'Bitcoin and Ethereum spot prices with 24h change',            defaultWidth: 'half' },
   { id: 'drought',            label: 'Drought Monitor',     description: 'US drought coverage by level from NOAA/USDA/NIDIS',           defaultWidth: 'half' },
-  { id: 'radiation',          label: 'Radiation Monitor',   description: 'Global background radiation from Radmon.org network',         defaultWidth: 'half' },
+
   { id: 'near_earth',         label: 'Near Earth Objects',  description: 'Upcoming asteroid and comet close approaches from NASA',       defaultWidth: 'half' },
   { id: 'storm_threats',      label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories from NHC and PTWC',   defaultWidth: 'half' },
   { id: 'cisa_alerts',        label: 'CISA Alerts',         description: 'Cybersecurity advisories and alerts from CISA',               defaultWidth: 'half' },
@@ -1231,7 +1191,7 @@ function renderWidgetContent(id: string, data: DashData, user: { username: strin
     case 'recalls':           return <RecallsContent />
     case 'crypto':            return <CryptoContent />
     case 'drought':           return <DroughtContent />
-    case 'radiation':         return <RadiationContent />
+
     case 'near_earth':        return <NearEarthContent />
     case 'storm_threats':     return <StormThreatsContent />
     case 'cisa_alerts':       return <CisaAlertsContent />
