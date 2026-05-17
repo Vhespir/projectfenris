@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 # Fenris DB backup -- dumps postgres, compresses, uploads to Backblaze B2, prunes old backups.
-# Requires: rclone configured with a remote named "b2" pointing to your B2 bucket.
-#
-# Setup:
-#   sudo apt install rclone
-#   rclone config  (create a remote named "b2", type "b2", enter keyID + applicationKey)
+# Requires: rclone configured with nexus-restic remote (already set up).
 #
 # Cron (daily at 2am):
 #   0 2 * * * /path/to/projectfenris-site/scripts/backup.sh >> /var/log/fenris-backup.log 2>&1
@@ -14,7 +10,7 @@ set -euo pipefail
 CONTAINER="fenris_db"
 DB_NAME="${DB_NAME:-fenris}"
 DB_USER="${DB_USER:-fenris}"
-RCLONE_REMOTE="b2:fenris-backups"
+RCLONE_REMOTE="nexus-restic:fenris-backups"
 KEEP_DAYS=30
 BACKUP_DIR="/tmp/fenris-backups"
 TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
