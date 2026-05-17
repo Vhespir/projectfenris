@@ -642,3 +642,52 @@ export function EventLayer({ events, activeFilters, popups = true }: EventLayerP
 
   return null
 }
+
+// ─── Wildfire Perimeters (NIFC) ───────────────────────────────────────────────
+
+export function WildfirePerimeterLayer() {
+  const map = useMap()
+  const layerRef = useRef<L.GeoJSON | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch('/api/external/perimeters', { signal: AbortSignal.timeout(30_000) })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.features) return
+        if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null }
+
+        layerRef.current = L.geoJSON(data, {
+          style: () => ({
+            color: '#F97316',
+            weight: 1.5,
+            fillColor: '#EF4444',
+            fillOpacity: 0.22,
+            opacity: 0.75,
+          }),
+          onEachFeature: (f, layer) => {
+            const p = f.properties ?? {}
+            const name = esc(p.IncidentName ?? 'Unknown Fire')
+            const acres = p.GISAcres ? `${Math.round(p.GISAcres).toLocaleString()} acres` : ''
+            const pct = p.PercentContained != null ? `${p.PercentContained}% contained` : ''
+            layer.bindPopup(`
+              <div style="font-family:'Space Grotesk',sans-serif;min-width:180px;background:#111111;color:#F4F4F5;border-radius:6px">
+                <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#F97316;margin-bottom:4px">NIFC · Wildfire Perimeter</div>
+                <div style="font-weight:600;font-size:14px;margin-bottom:6px">${name}</div>
+                <div style="font-size:12px;color:#A1A1AA">${[acres, pct].filter(Boolean).join(' · ')}</div>
+              </div>
+            `)
+          },
+        }).addTo(map)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+      if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null }
+    }
+  }, [map])
+
+  return null
+}

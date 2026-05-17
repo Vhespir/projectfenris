@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import {
-  EventLayer, RadarLayer, WeatherAlertLayer, AirTrafficLayer, FieldReportLayer, FireLayer,
+  EventLayer, RadarLayer, WeatherAlertLayer, AirTrafficLayer, FieldReportLayer, FireLayer, WildfirePerimeterLayer,
   type DisasterEvent, type AirTrafficFilters, type AltitudeBand, type FireTimeRange,
 } from '../components/MapEventLayer'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -14,11 +14,12 @@ const SOURCES = [
 ]
 
 const OVERLAYS = [
-  { key: 'radar',   label: 'Radar' },
-  { key: 'alerts',  label: 'Weather Alerts' },
-  { key: 'traffic', label: 'Air Traffic' },
-  { key: 'fires',   label: 'Fires' },
-  { key: 'reports', label: 'Field Reports' },
+  { key: 'radar',      label: 'Radar' },
+  { key: 'alerts',     label: 'Weather Alerts' },
+  { key: 'traffic',    label: 'Air Traffic' },
+  { key: 'fires',      label: 'Fires' },
+  { key: 'perimeters', label: 'Fire Perimeters' },
+  { key: 'reports',    label: 'Field Reports' },
 ]
 
 const FIRE_RANGES: { key: FireTimeRange; label: string; desc: string }[] = [
@@ -198,6 +199,7 @@ export default function MapPage() {
           {activeOverlays.has('alerts')  && <WeatherAlertLayer />}
           {trafficActive && <AirTrafficLayer filters={atFilters} onCount={setAtCount} />}
           {firesActive && <FireLayer range={fireRange} />}
+          {activeOverlays.has('perimeters') && <WildfirePerimeterLayer />}
           {activeOverlays.has('reports') && <FieldReportLayer />}
           <EventLayer events={events} activeFilters={activeFilters} />
         </MapContainer>

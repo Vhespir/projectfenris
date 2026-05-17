@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 
 const inputStyle = {
@@ -828,6 +829,21 @@ const TOOLS = [
   },
 ]
 
+const TOOL_LINKS = [
+  {
+    id: 'frequencies',
+    name: 'Emergency Frequency Database',
+    desc: 'Police, fire, EMS, ham radio, NOAA weather, and GMRS frequencies by county. Community-maintained reference.',
+    link: '/frequencies',
+  },
+  {
+    id: 'aar',
+    name: 'After Action Reports',
+    desc: 'Real emergencies documented by community members. What worked, what failed, what they wish they had.',
+    link: '/aar',
+  },
+]
+
 export default function Tools() {
   const [selected, setSelected] = useState<string | null>(null)
   const active = TOOLS.find(t => t.id === selected)
@@ -857,6 +873,21 @@ export default function Tools() {
             <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.5, marginBottom: tool.coming ? '10px' : '0' }}>{tool.desc}</div>
             {tool.coming && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Coming soon</div>}
           </button>
+        ))}
+        {TOOL_LINKS.map(tool => (
+          <Link
+            key={tool.id}
+            to={tool.link}
+            style={{
+              textDecoration: 'none', textAlign: 'left', background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)', borderRadius: '8px', padding: '20px', display: 'block',
+            }}
+            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--color-accent)')}
+            onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+          >
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '6px' }}>{tool.name}</div>
+            <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.5 }}>{tool.desc}</div>
+          </Link>
         ))}
       </div>
 

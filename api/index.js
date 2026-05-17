@@ -18,6 +18,9 @@ import { messageRoutes } from './routes/messages.js'
 import { notificationRoutes } from './routes/notifications.js'
 import { searchRoutes } from './routes/search.js'
 import { modRoutes } from './routes/mod.js'
+import { externalRoutes } from './routes/external.js'
+import { aarRoutes } from './routes/aar.js'
+import { frequencyRoutes } from './routes/frequencies.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
 
@@ -137,12 +140,18 @@ app.get('/events', async (req) => {
 })
 
 app.get('/news', async (req) => {
-  const { limit = 50 } = req.query
-  const { rows } = await pool.query(
-    `SELECT id, source, title, url, summary, category, region, published_at
-     FROM news_items ORDER BY published_at DESC NULLS LAST LIMIT $1`,
-    [Math.min(Number(limit), 200)]
-  )
+  const { limit = 50, category, source } = req.query
+  let query = `SELECT id, source, title, url, summary, category, region, published_at FROM news_items WHERE 1=1`
+  const params = []
+  if (category) {
+    const cats = String(category).split(',').map(c => c.trim()).filter(Boolean)
+    if (cats.length === 1) { params.push(cats[0]); query += ` AND category = $${params.length}` }
+    else if (cats.length > 1) { params.push(cats); query += ` AND category = ANY($${params.length}::text[])` }
+  }
+  if (source) { params.push(String(source).trim()); query += ` AND source = $${params.length}` }
+  params.push(Math.min(Number(limit), 200))
+  query += ` ORDER BY published_at DESC NULLS LAST LIMIT $${params.length}`
+  const { rows } = await pool.query(query, params)
   return rows
 })
 
@@ -340,6 +349,9 @@ await app.register(messageRoutes, { pool })
 await app.register(notificationRoutes, { pool })
 await app.register(searchRoutes, { pool })
 await app.register(modRoutes, { pool })
+await app.register(externalRoutes)
+await app.register(aarRoutes, { pool })
+await app.register(frequencyRoutes, { pool })
 
 try {
   await runMigrations(process.env.DATABASE_URL)

@@ -7,6 +7,7 @@ import { fetchGDACS } from './fetchers/gdacs.js'
 import { fetchMeteoAlarm } from './fetchers/meteoalarm.js'
 import { fetchEPA }  from './fetchers/epa.js'
 import { fetchNews } from './fetchers/news.js'
+import { fetchSWPC } from './fetchers/swpc.js'
 import { checkPendingAlerts } from './lib/alerts.js'
 
 dotenv.config()
@@ -14,7 +15,7 @@ dotenv.config()
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 
 async function runAll() {
-  await Promise.allSettled([fetchNOAA(), fetchUSGS(), fetchGDACS(), fetchEPA(), fetchNews(), fetchMeteoAlarm()])
+  await Promise.allSettled([fetchNOAA(), fetchUSGS(), fetchGDACS(), fetchEPA(), fetchNews(), fetchSWPC(), fetchMeteoAlarm()])
   await checkPendingAlerts(pool)
 }
 

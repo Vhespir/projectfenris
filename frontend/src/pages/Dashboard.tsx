@@ -588,6 +588,595 @@ function TopGuidesContent() {
   )
 }
 
+// ─── Widget: Markets (Gold / Silver / WTI Oil) ────────────────────────────────
+
+interface MetalsData { gold: { price: number; change_pct: number }; silver: { price: number; change_pct: number } }
+interface OilData { price: number; change_pct: number | null; period: string; unit: string }
+
+function MarketsContent() {
+  const [metals, setMetals] = useState<MetalsData | null>(null)
+  const [oil, setOil] = useState<OilData | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/external/metals').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/external/oil').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([m, o]) => {
+      setMetals(m && !m.error ? m : null)
+      setOil(o && !o.error ? o : null)
+      setLoading(false)
+    })
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!metals && !oil) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  function PriceRow({ label, price, changePct, fmt }: { label: string; price: number; changePct: number | null; fmt: (n: number) => string }) {
+    const color = changePct == null ? 'var(--color-muted)' : changePct >= 0 ? '#22C55E' : '#EF4444'
+    const sign  = changePct != null && changePct >= 0 ? '+' : ''
+    return (
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '52px', flexShrink: 0 }}>{label}</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>{fmt(price)}</span>
+        {changePct != null && (
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color, fontWeight: 600 }}>{sign}{changePct.toFixed(2)}%</span>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {metals?.gold  && <PriceRow label="Gold"   price={metals.gold.price}   changePct={metals.gold.change_pct}   fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
+      {metals?.silver && <PriceRow label="Silver" price={metals.silver.price} changePct={metals.silver.change_pct} fmt={n => `$${n.toFixed(2)}`} />}
+      {oil && <PriceRow label="WTI" price={oil.price} changePct={oil.change_pct} fmt={n => `$${n.toFixed(2)}`} />}
+      <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
+        Gold/Silver: GoldPrice.org{oil?.period ? ` · WTI: ${oil.period} · EIA` : ''}
+      </div>
+    </div>
+  )
+}
+
+// ─── Widget: Economic Signals ─────────────────────────────────────────────────
+
+function EconomicSignalsContent() {
+  const [yieldCurve, setYieldCurve] = useState<{ observations: { date: string; value: number }[] } | null>(null)
+  const [m2, setM2] = useState<{ observations: { date: string; value: number }[] } | null>(null)
+  const [cpi, setCpi] = useState<{ cpi: number; yoy_pct: number; period: string } | null>(null)
+  const [fdic, setFdic] = useState<{ failures: { name: string; faildate: string; state: string }[]; this_year_count: number } | null>(null)
+  const [unemp, setUnemp] = useState<{ claims: number; change: number | null; four_week_avg: number; period: string } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/external/fred/T10Y2Y').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/external/fred/M2SL').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/external/bls/cpi').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/external/fdic').then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch('/api/external/bls/unemployment').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([yc, m, c, f, u]) => {
+      setYieldCurve(yc && !yc.error ? yc : null)
+      setM2(m && !m.error ? m : null)
+      setCpi(c && !c.error ? c : null)
+      setFdic(f && !f.error ? f : null)
+      setUnemp(u && !u.error ? u : null)
+      setLoading(false)
+    })
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+
+  const latestYield = yieldCurve?.observations?.[0]
+  const yieldInverted = latestYield && latestYield.value < 0
+  const yieldColor = latestYield ? (yieldInverted ? '#EF4444' : '#22C55E') : 'var(--color-muted)'
+
+  const latestM2 = m2?.observations?.[0]
+  const prevM2 = m2?.observations?.[12]
+  const m2Yoy = latestM2 && prevM2 ? ((latestM2.value - prevM2.value) / prevM2.value) * 100 : null
+
+  const rows = [
+    latestYield && {
+      label: 'Yield Curve',
+      value: `${latestYield.value >= 0 ? '+' : ''}${latestYield.value.toFixed(2)}%`,
+      note: yieldInverted ? 'INVERTED' : 'Normal',
+      color: yieldColor,
+    },
+    cpi?.yoy_pct != null && {
+      label: 'CPI YoY',
+      value: `${cpi.yoy_pct.toFixed(1)}%`,
+      note: cpi.period,
+      color: cpi.yoy_pct > 5 ? '#EF4444' : cpi.yoy_pct > 3 ? '#F59E0B' : '#22C55E',
+    },
+    latestM2 && {
+      label: 'M2 Supply',
+      value: `$${(latestM2.value / 1000).toFixed(1)}T`,
+      note: m2Yoy != null ? `${m2Yoy >= 0 ? '+' : ''}${m2Yoy.toFixed(1)}% YoY` : '',
+      color: 'var(--color-muted)',
+    },
+    unemp?.claims != null && {
+      label: 'Init. Claims',
+      value: unemp.claims.toLocaleString(),
+      note: `${unemp.change != null ? (unemp.change >= 0 ? '+' : '') + unemp.change.toLocaleString() + ' · ' : ''}4wk avg ${unemp.four_week_avg.toLocaleString()}`,
+      color: unemp.claims > 300000 ? '#EF4444' : unemp.claims > 250000 ? '#F59E0B' : 'var(--color-muted)',
+    },
+    fdic && {
+      label: 'Bank Failures',
+      value: String(fdic.this_year_count),
+      note: `this year${fdic.failures[0] ? ` · ${fdic.failures[0].name}` : ''}`,
+      color: fdic.this_year_count > 0 ? '#F59E0B' : '#22C55E',
+    },
+  ].filter(Boolean) as { label: string; value: string; note: string; color: string }[]
+
+  if (!rows.length) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {rows.map(row => (
+        <div key={row.label} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '96px', flexShrink: 0 }}>{row.label}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: row.color, flex: 1 }}>{row.value}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textAlign: 'right' }}>{row.note}</span>
+        </div>
+      ))}
+      <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>FRED · BLS · FDIC</div>
+    </div>
+  )
+}
+
+// ─── Widget: Space Weather ────────────────────────────────────────────────────
+
+function SpaceWeatherContent() {
+  const [alerts, setAlerts] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/news?category=space_weather&limit=6')
+      .then(r => r.json())
+      .then(data => { setAlerts(Array.isArray(data) ? data : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!alerts.length) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>No space weather alerts.</div>
+
+  const levelColor = (title: string) => {
+    const t = title.toLowerCase()
+    if (t.includes('g5') || t.includes('x5') || t.includes('extreme')) return '#EF4444'
+    if (t.includes('g4') || t.includes('g3') || t.includes('x1') || t.includes('x2')) return '#F59E0B'
+    if (t.includes('g2') || t.includes('m5')) return '#EAB308'
+    return '#3B82F6'
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {alerts.map(item => {
+        const color = levelColor(item.title)
+        return (
+          <a key={item.id} href={item.url ?? 'https://www.swpc.noaa.gov'} target="_blank" rel="noopener noreferrer"
+            style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '10px 14px', borderLeft: `3px solid ${color}` }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>NOAA SWPC</span>
+              {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
+            </div>
+            <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─── Widget: Reactor Status ───────────────────────────────────────────────────
+
+interface Reactor { name: string; state: string; unit: number; power: number; status: string | null }
+
+function ReactorStatusContent() {
+  const [data, setData] = useState<{ reportDate: string | null; total: number; reactors: Reactor[] } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/external/nrc')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>NRC data unavailable.</div>
+
+  const atPower = data.reactors.filter(r => r.power >= 100).length
+  const reduced = data.reactors.filter(r => r.power < 100).sort((a, b) => a.power - b.power)
+
+  return (
+    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: '#22C55E', lineHeight: 1 }}>{atPower}</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>At 100%</div>
+        </div>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: reduced.length > 0 ? '#F59E0B' : 'var(--color-muted)', lineHeight: 1 }}>{reduced.length}</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Reduced/Offline</div>
+        </div>
+        <div style={{ marginLeft: 'auto' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)' }}>{data.total} total</div>
+          {data.reportDate && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', marginTop: '2px' }}>{data.reportDate}</div>}
+        </div>
+      </div>
+      {reduced.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+          {reduced.slice(0, 6).map(r => (
+            <div key={`${r.name}-${r.unit}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 14px', background: 'var(--color-surface)' }}>
+              <div style={{ width: '32px', height: '4px', borderRadius: '2px', background: 'var(--color-bg)', overflow: 'hidden', flexShrink: 0 }}>
+                <div style={{ height: '100%', width: `${r.power}%`, background: r.power === 0 ? '#EF4444' : '#F59E0B', borderRadius: '2px' }} />
+              </div>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: r.power === 0 ? '#EF4444' : '#F59E0B', width: '36px', flexShrink: 0 }}>{r.power}%</span>
+              <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name} {r.unit}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{r.state}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>NRC Power Reactor Status Report</div>
+    </div>
+  )
+}
+
+// ─── Widget: Active Recalls ───────────────────────────────────────────────────
+
+function RecallsContent() {
+  const [items, setItems] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/news?category=recall&limit=8')
+      .then(r => r.json())
+      .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!items.length) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>No active recalls.</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {items.map(item => (
+        <a key={item.id} href={item.url ?? '#'} target="_blank" rel="noopener noreferrer"
+          style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '10px 14px' }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#F59E0B', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.source}</span>
+            {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
+          </div>
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+// ─── Widget: Crypto ──────────────────────────────────────────────────────────
+
+function CryptoContent() {
+  const [data, setData] = useState<{ bitcoin: { price: number; change_pct: number }; ethereum: { price: number; change_pct: number } } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/external/crypto')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  const coins = [
+    { label: 'BTC', ...data.bitcoin },
+    { label: 'ETH', ...data.ethereum },
+  ]
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {coins.map(c => {
+        const color = c.change_pct >= 0 ? '#22C55E' : '#EF4444'
+        return (
+          <div key={c.label} style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '36px', flexShrink: 0 }}>{c.label}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>
+              ${c.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color, fontWeight: 600 }}>
+              {c.change_pct >= 0 ? '+' : ''}{c.change_pct.toFixed(2)}%
+            </span>
+          </div>
+        )
+      })}
+      <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>CoinGecko · 24h change</div>
+    </div>
+  )
+}
+
+// ─── Widget: Drought Monitor ──────────────────────────────────────────────────
+
+function DroughtContent() {
+  const [data, setData] = useState<{ date: string; none: number; d0: number; d1: number; d2: number; d3: number; d4: number } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/external/drought')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  const levels = [
+    { key: 'd4', label: 'D4 Exceptional', pct: data.d4, color: '#7C3AED' },
+    { key: 'd3', label: 'D3 Extreme',     pct: data.d3, color: '#EF4444' },
+    { key: 'd2', label: 'D2 Severe',      pct: data.d2, color: '#F97316' },
+    { key: 'd1', label: 'D1 Moderate',    pct: data.d1, color: '#F59E0B' },
+    { key: 'd0', label: 'D0 Abnormal',    pct: data.d0, color: '#EAB308' },
+    { key: 'none', label: 'No Drought',   pct: data.none, color: '#22C55E' },
+  ]
+
+  const inDrought = 100 - (data.none ?? 0)
+
+  return (
+    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: inDrought > 50 ? '#F59E0B' : 'var(--color-text)', lineHeight: 1 }}>
+            {inDrought.toFixed(1)}%
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>US in drought</div>
+        </div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginBottom: '4px', marginLeft: 'auto' }}>
+          {data.date}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+        {levels.filter(l => l.pct > 0).map(l => (
+          <div key={l.key} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ width: '8px', height: '8px', borderRadius: '2px', background: l.color, flexShrink: 0 }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', width: '100px', flexShrink: 0 }}>{l.label}</span>
+            <div style={{ flex: 1, height: '4px', background: 'var(--color-border)', borderRadius: '2px', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${l.pct}%`, background: l.color, borderRadius: '2px' }} />
+            </div>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', width: '38px', textAlign: 'right' }}>{l.pct.toFixed(1)}%</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>NOAA/USDA/NIDIS Drought Monitor</div>
+    </div>
+  )
+}
+
+// ─── Widget: Radiation Monitoring ────────────────────────────────────────────
+
+function RadiationContent() {
+  const [data, setData] = useState<{ station_count: number; avg_cpm: number | null; elevated_count: number } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/external/radiation')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  const status = data.elevated_count > 5 ? 'ELEVATED' : data.elevated_count > 0 ? 'WATCH' : 'NORMAL'
+  const statusColor = data.elevated_count > 5 ? '#EF4444' : data.elevated_count > 0 ? '#F59E0B' : '#22C55E'
+
+  return (
+    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: statusColor, lineHeight: 1 }}>{status}</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Global Status</div>
+        </div>
+        {data.avg_cpm != null && (
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '22px', fontWeight: 700, color: 'var(--color-muted)', lineHeight: 1 }}>{data.avg_cpm}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Avg CPM</div>
+          </div>
+        )}
+        <div style={{ marginLeft: 'auto' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-muted)', textAlign: 'right' }}>{data.station_count} stations</div>
+          {data.elevated_count > 0 && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#F59E0B', textAlign: 'right' }}>{data.elevated_count} elevated</div>
+          )}
+        </div>
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
+        Radmon.org community radiation network · CPM varies by detector type
+      </div>
+    </div>
+  )
+}
+
+// ─── Widget: Near Earth Objects ───────────────────────────────────────────────
+
+interface NEOObject { name: string; hazardous: boolean; diameter_km: number | null; miss_distance_lunar: number; velocity_kms: number; date: string }
+
+function NearEarthContent() {
+  const [data, setData] = useState<{ total: number; hazardous_count: number; closest: NEOObject[]; date_range: string } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/external/neo')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  return (
+    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: 'var(--color-text)', lineHeight: 1 }}>{data.total}</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Near Earth Objects</div>
+        </div>
+        {data.hazardous_count > 0 && (
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '22px', fontWeight: 700, color: '#EF4444', lineHeight: 1 }}>{data.hazardous_count}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: '#EF4444', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Potentially Hazardous</div>
+          </div>
+        )}
+        <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textAlign: 'right' }}>{data.date_range}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+        {data.closest.slice(0, 4).map((o, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 12px', background: 'var(--color-surface)' }}>
+            {o.hazardous && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#EF4444', flexShrink: 0 }}>PHA</span>}
+            <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', flexShrink: 0 }}>{o.miss_distance_lunar.toFixed(1)} LD</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>NASA Center for Near Earth Object Studies · LD = lunar distances</div>
+    </div>
+  )
+}
+
+// ─── Widget: Storm Threats (NHC + PTWC) ──────────────────────────────────────
+
+function StormThreatsContent() {
+  const [items, setItems] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/news?category=hurricane,tsunami&limit=6')
+      .then(r => r.json())
+      .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+
+  const srcColor = (source: string) => source === 'NHC' ? '#3B82F6' : source === 'PTWC' ? '#F59E0B' : 'var(--color-muted)'
+
+  if (!items.length) return (
+    <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#22C55E', display: 'inline-block', flexShrink: 0 }} />
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#22C55E', letterSpacing: '0.06em' }}>NO ACTIVE STORM ADVISORIES</span>
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {items.map(item => (
+        <a key={item.id} href={item.url ?? '#'} target="_blank" rel="noopener noreferrer"
+          style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '10px 14px', borderLeft: `3px solid ${srcColor(item.source)}` }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: srcColor(item.source), textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.source}</span>
+            {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
+          </div>
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+// ─── Widget: CISA Cybersecurity Alerts ────────────────────────────────────────
+
+function CisaAlertsContent() {
+  const [items, setItems] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/news?category=cybersecurity&limit=6')
+      .then(r => r.json())
+      .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!items.length) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>No recent advisories.</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {items.map(item => (
+        <a key={item.id} href={item.url ?? '#'} target="_blank" rel="noopener noreferrer"
+          style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '10px 14px' }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#3B82F6', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.source}</span>
+            {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
+          </div>
+          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+        </a>
+      ))}
+    </div>
+  )
+}
+
+// ─── Widget: Travel Advisories ────────────────────────────────────────────────
+
+function TravelAdvisoriesContent() {
+  const [items, setItems] = useState<NewsItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/news?category=travel&limit=6')
+      .then(r => r.json())
+      .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!items.length) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>No recent advisories.</div>
+
+  const levelColor = (title: string) => {
+    const t = title.toLowerCase()
+    if (t.includes('level 4') || t.includes('do not travel')) return '#EF4444'
+    if (t.includes('level 3') || t.includes('reconsider')) return '#F59E0B'
+    if (t.includes('level 2') || t.includes('exercise increased')) return '#EAB308'
+    return 'var(--color-muted)'
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {items.map(item => {
+        const color = levelColor(item.title)
+        return (
+          <a key={item.id} href={item.url ?? '#'} target="_blank" rel="noopener noreferrer"
+            style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '10px 14px', borderLeft: `3px solid ${color}` }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.05em' }}>State Dept</span>
+              {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
+            </div>
+            <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+          </a>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Widget registry ──────────────────────────────────────────────────────────
 
 interface WidgetDef {
@@ -606,7 +1195,19 @@ const WIDGET_DEFS: WidgetDef[] = [
   { id: 'quick_actions', label: 'Quick Actions',    description: 'Navigation links and auth actions',                 defaultWidth: 'half' },
   { id: 'inventory',     label: 'Inventory Status', description: 'Summary of your prep inventory',                   defaultWidth: 'half',  link: '/tools',     linkLabel: 'Manage' },
   { id: 'top_guides',    label: 'Top Guides',       description: 'Highest rated guides from the compendium',          defaultWidth: 'half',  link: '/compendium', linkLabel: 'View all' },
-  { id: 'radar_widget', label: 'Radar',            description: 'Live weather radar overlay',                         defaultWidth: 'half',  link: '/map',        linkLabel: 'Full map' },
+  { id: 'radar_widget',       label: 'Radar',               description: 'Live weather radar overlay',                                defaultWidth: 'half',  link: '/map',        linkLabel: 'Full map' },
+  { id: 'markets',            label: 'Markets',             description: 'Gold, silver, and WTI crude oil spot prices',               defaultWidth: 'half' },
+  { id: 'economic_signals',   label: 'Economic Signals',    description: 'Yield curve, CPI, M2 money supply, bank failures',           defaultWidth: 'half' },
+  { id: 'space_weather',      label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts',         defaultWidth: 'half' },
+  { id: 'reactor_status',     label: 'Reactor Status',      description: 'NRC nuclear power plant operating status',                   defaultWidth: 'half' },
+  { id: 'recalls',            label: 'Active Recalls',      description: 'Recent FDA and USDA food and drug recall alerts',            defaultWidth: 'half' },
+  { id: 'crypto',             label: 'Crypto',              description: 'Bitcoin and Ethereum spot prices with 24h change',            defaultWidth: 'half' },
+  { id: 'drought',            label: 'Drought Monitor',     description: 'US drought coverage by level from NOAA/USDA/NIDIS',           defaultWidth: 'half' },
+  { id: 'radiation',          label: 'Radiation Monitor',   description: 'Global background radiation from Radmon.org network',         defaultWidth: 'half' },
+  { id: 'near_earth',         label: 'Near Earth Objects',  description: 'Upcoming asteroid and comet close approaches from NASA',       defaultWidth: 'half' },
+  { id: 'storm_threats',      label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories from NHC and PTWC',   defaultWidth: 'half' },
+  { id: 'cisa_alerts',        label: 'CISA Alerts',         description: 'Cybersecurity advisories and alerts from CISA',               defaultWidth: 'half' },
+  { id: 'travel_advisories',  label: 'Travel Advisories',   description: 'US State Department travel advisories by country',            defaultWidth: 'half' },
 ]
 
 // ─── Widget content dispatcher ───────────────────────────────────────────────
@@ -620,9 +1221,21 @@ function renderWidgetContent(id: string, data: DashData, user: { username: strin
     case 'community':     return <CommunityContent data={data} />
     case 'field_reports': return <FieldReportsContent data={data} />
     case 'quick_actions': return <QuickActionsContent user={user} />
-    case 'inventory':     return <InventoryContent />
-    case 'top_guides':    return <TopGuidesContent />
-    case 'radar_widget': return <RadarWidgetContent />
+    case 'inventory':         return <InventoryContent />
+    case 'top_guides':        return <TopGuidesContent />
+    case 'radar_widget':      return <RadarWidgetContent />
+    case 'markets':           return <MarketsContent />
+    case 'economic_signals':  return <EconomicSignalsContent />
+    case 'space_weather':     return <SpaceWeatherContent />
+    case 'reactor_status':    return <ReactorStatusContent />
+    case 'recalls':           return <RecallsContent />
+    case 'crypto':            return <CryptoContent />
+    case 'drought':           return <DroughtContent />
+    case 'radiation':         return <RadiationContent />
+    case 'near_earth':        return <NearEarthContent />
+    case 'storm_threats':     return <StormThreatsContent />
+    case 'cisa_alerts':       return <CisaAlertsContent />
+    case 'travel_advisories': return <TravelAdvisoriesContent />
     default: return null
   }
 }

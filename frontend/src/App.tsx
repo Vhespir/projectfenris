@@ -22,6 +22,8 @@ import Mod from './pages/Mod'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import Inbox from './pages/Inbox'
+import AfterAction, { AARDetail } from './pages/AfterAction'
+import Frequencies from './pages/Frequencies'
 import { SocketProvider } from './context/SocketContext'
 
 function ProfileRedirect() {
@@ -58,6 +60,9 @@ function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/inbox/:username" element={<Inbox />} />
+          <Route path="/aar" element={<AfterAction />} />
+          <Route path="/aar/:id" element={<AARDetail />} />
+          <Route path="/frequencies" element={<Frequencies />} />
           <Route path="/500" element={<ServerError />} />
           <Route path="/403" element={<Forbidden />} />
           <Route path="/503" element={<Maintenance />} />
