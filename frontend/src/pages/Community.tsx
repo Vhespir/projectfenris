@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { getTier } from '../utils/tier'
+import { useSocket } from '../context/SocketContext'
 
 interface Post {
   id: number
@@ -10,34 +13,58 @@ interface Post {
   body: string
   location_label: string | null
   upvote_count: number
+  downvote_count: number
   created_at: string
   username: string | null
-  is_trusted: boolean
+  reputation: number
+  is_founding_member?: boolean
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  community: 'Community',
-  field_report: 'Field Report',
-  self_reported_news: 'News Report',
+interface Channel {
+  id: string
+  label: string
+  type: string | null
+  category: string | null
 }
 
-const TYPE_COLOR: Record<string, string> = {
-  community: 'var(--color-info)',
-  field_report: 'var(--color-warning)',
-  self_reported_news: 'var(--color-accent)',
-}
+const CHANNELS: Channel[] = [
+  { id: 'all',      label: 'All Posts',             type: null,                 category: null },
+  { id: 'field',    label: 'Field Reports',          type: 'field_report',       category: null },
+  { id: 'news',     label: 'News Reports',           type: 'self_reported_news', category: null },
+  { id: 'gear',     label: 'Gear and Equipment',     type: 'community',          category: 'Gear and Equipment' },
+  { id: 'food',     label: 'Food and Water',         type: 'community',          category: 'Food and Water' },
+  { id: 'medical',  label: 'Medical',                type: 'community',          category: 'Medical and First Aid' },
+  { id: 'comms',    label: 'Communications',         type: 'community',          category: 'Communications and Ham Radio' },
+  { id: 'security', label: 'Security',               type: 'community',          category: 'Security and Self Defense' },
+  { id: 'evac',     label: 'Bug Out and Evac',       type: 'community',          category: 'Evacuation and Bugging Out' },
+  { id: 'homestead',label: 'Homesteading',           type: 'community',          category: 'Homesteading and Self Sufficiency' },
+  { id: 'skills',   label: 'Skills and Training',    type: 'community',          category: 'Skills and Training' },
+  { id: 'general',  label: 'General Discussion',     type: 'community',          category: 'General Discussion' },
+]
 
 const FIELD_REPORT_CATEGORIES = [
   'Weather Event', 'Natural Disaster', 'Infrastructure', 'Civil Unrest',
   'Hazmat or Environmental', 'Medical or Health', 'General Observation',
 ]
 
-const COMMUNITY_CATEGORIES = [
-  'Gear and Equipment', 'Food and Water', 'Medical and First Aid', 'Shelter and Housing',
-  'Communications and Ham Radio', 'Evacuation and Bugging Out', 'Skills and Training',
-  'Homesteading and Self Sufficiency', 'Off Grid Living', 'Security and Self Defense',
-  'Financial Preparedness', 'Community Organizing', 'Regional Prep', 'General Discussion',
-]
+const TYPE_COLOR: Record<string, string> = {
+  community:          'var(--color-info)',
+  field_report:       'var(--color-warning)',
+  self_reported_news: 'var(--color-accent)',
+}
+const TYPE_LABEL: Record<string, string> = {
+  community:          'Community',
+  field_report:       'Field Report',
+  self_reported_news: 'News Report',
+}
+
+const SORTS = [
+  { key: 'recent',        label: 'Recent' },
+  { key: 'signal',        label: 'Signal' },
+  { key: 'proven',        label: 'Proven' },
+  { key: 'controversial', label: 'Controversial' },
+] as const
+type Sort = typeof SORTS[number]['key']
 
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
@@ -48,106 +75,192 @@ function timeAgo(iso: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
-function PostCard({ post }: { post: Post }) {
+function PostCard({ post, currentUser }: { post: Post; currentUser: { id: number } | null }) {
+  const navigate = useNavigate()
   const color = TYPE_COLOR[post.post_type] ?? 'var(--color-muted)'
+  const [myVote, setMyVote] = useState<'up' | 'down' | null>(null)
+  const [upvotes, setUpvotes] = useState(post.upvote_count)
+  const [downvotes, setDownvotes] = useState(post.downvote_count)
+  const [voting, setVoting] = useState(false)
+
+  async function handleVote(dir: 'up' | 'down', e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!currentUser) { navigate('/login'); return }
+    if (voting) return
+    setVoting(true)
+    try {
+      const endpoint = dir === 'up' ? 'upvote' : 'downvote'
+      const res = await fetch(`/api/posts/${post.id}/${endpoint}`, { method: 'POST' })
+      if (!res.ok) return
+      const data = await res.json()
+      setMyVote(data.vote)
+      setUpvotes(data.upvote_count)
+      setDownvotes(data.downvote_count)
+    } finally { setVoting(false) }
+  }
+
   return (
-    <Link to={`/post/${post.id}`} style={{ textDecoration: 'none' }}>
-      <div style={{
+    <div
+      onClick={() => navigate(`/post/${post.id}`)}
+      style={{
         background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-        borderRadius: '6px', padding: '16px 20px', borderLeft: `3px solid ${color}`,
-        transition: 'border-color 0.15s',
+        borderLeft: `3px solid ${color}`, borderRadius: '6px', padding: '14px 18px',
+        cursor: 'pointer', transition: 'border-color 0.15s',
       }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
-        onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-          <span style={{
-            fontSize: '11px', fontFamily: 'var(--font-mono)', padding: '2px 7px',
-            borderRadius: '3px', background: `${color}18`, color, border: `1px solid ${color}40`,
-            textTransform: 'uppercase', letterSpacing: '0.05em',
-          }}>
-            {TYPE_LABELS[post.post_type] ?? post.post_type}
-          </span>
-          <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)' }}>
-            {post.category}
-          </span>
-          {post.location_label && (
-            <span style={{ fontSize: '11px', color: 'var(--color-muted)' }}>
-              {post.location_label}
+      onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
+      onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px', flexWrap: 'wrap' }}>
+        <span style={{
+          fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '3px',
+          background: `${color}18`, color, border: `1px solid ${color}40`,
+          textTransform: 'uppercase', letterSpacing: '0.05em',
+        }}>
+          {TYPE_LABEL[post.post_type] ?? post.post_type}
+        </span>
+        <span style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+          {post.category}
+        </span>
+        {post.location_label && (
+          <span style={{ fontSize: '11px', color: 'var(--color-subtle)' }}>{post.location_label}</span>
+        )}
+      </div>
+      <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '4px', lineHeight: 1.4 }}>
+        {post.title}
+      </div>
+      <div style={{ fontSize: '13px', color: 'var(--color-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
+        {post.body.length > 140 ? post.body.slice(0, 140) + '...' : post.body}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
+        <button onClick={e => handleVote('up', e)} disabled={voting} style={{
+          display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '4px',
+          border: `1px solid ${myVote === 'up' ? 'rgba(34,197,94,0.4)' : 'transparent'}`,
+          background: myVote === 'up' ? 'rgba(34,197,94,0.12)' : 'transparent',
+          color: myVote === 'up' ? 'var(--color-accent)' : 'var(--color-subtle)',
+          fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: voting ? 'not-allowed' : 'pointer',
+        }}>
+          Signal {upvotes > 0 && upvotes}
+        </button>
+        <button onClick={e => handleVote('down', e)} disabled={voting} style={{
+          display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '4px',
+          border: `1px solid ${myVote === 'down' ? 'rgba(239,68,68,0.4)' : 'transparent'}`,
+          background: myVote === 'down' ? 'rgba(239,68,68,0.1)' : 'transparent',
+          color: myVote === 'down' ? 'var(--color-danger)' : 'var(--color-subtle)',
+          fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: voting ? 'not-allowed' : 'pointer',
+        }}>
+          Noise {downvotes > 0 && downvotes}
+        </button>
+        <span style={{ color: 'var(--color-border)' }}>|</span>
+        <span style={{ color: 'var(--color-subtle)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          {post.username ?? 'anonymous'}
+          {(() => { const t = getTier(post.reputation ?? 0); return t ? (
+            <span style={{ fontSize: '9px', padding: '1px 5px', borderRadius: '3px', background: `${t.color}18`, color: t.color, border: `1px solid ${t.color}40`, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              {t.short}
+            </span>
+          ) : null })()}
+          {post.is_founding_member && (
+            <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: '3px', background: '#A78BFA18', color: '#A78BFA', border: '1px solid #A78BFA40', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Founder
             </span>
           )}
-        </div>
-        <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '6px', lineHeight: 1.4 }}>
-          {post.title}
-        </div>
-        <div style={{ fontSize: '13px', color: 'var(--color-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
-          {post.body.length > 140 ? post.body.slice(0, 140) + '...' : post.body}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
-          <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>
-            {post.upvote_count} {post.upvote_count === 1 ? 'upvote' : 'upvotes'}
-          </span>
-          <span>{post.username ?? 'anonymous'}{post.is_trusted ? ' ✓' : ''}</span>
-          <span>{timeAgo(post.created_at)}</span>
-        </div>
+        </span>
+        <span style={{ color: 'var(--color-subtle)' }}>{timeAgo(post.created_at)}</span>
       </div>
-    </Link>
+    </div>
   )
 }
 
-const FILTERS = [
-  { key: '', label: 'All' },
-  { key: 'field_report', label: 'Field Reports' },
-  { key: 'community', label: 'Community' },
-  { key: 'self_reported_news', label: 'News Reports' },
-]
-
 export default function Community() {
-  const { user, token } = useAuth()
+  const { user } = useAuth()
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
+  const socket = useSocket()
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const channelId = searchParams.get('channel') ?? 'all'
+  const channel = CHANNELS.find(c => c.id === channelId) ?? CHANNELS[0]
+
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
-  const [typeFilter, setTypeFilter] = useState('')
+  const [sort, setSort] = useState<Sort>('recent')
+  const [search, setSearch] = useState('')
   const [showForm, setShowForm] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
+  const [locating, setLocating] = useState(false)
+  const [newPostBanner, setNewPostBanner] = useState(false)
+
+  const defaultType = channel.type ?? 'community'
+  const defaultCategory = channel.category ?? ''
+
   const [form, setForm] = useState({
-    post_type: 'community',
-    category: '',
+    post_type: defaultType,
+    category: defaultCategory,
     title: '',
     body: '',
     location_label: '',
+    latitude: '',
+    longitude: '',
   })
-  const [submitting, setSubmitting] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
 
-  function loadPosts(type = typeFilter) {
+  function selectChannel(id: string) {
+    const ch = CHANNELS.find(c => c.id === id) ?? CHANNELS[0]
+    setSearchParams({ channel: id })
+    setShowForm(false)
+    setSearch('')
+    setForm(f => ({ ...f, post_type: ch.type ?? 'community', category: ch.category ?? '' }))
+  }
+
+  function loadPosts() {
     setLoading(true)
-    const url = type ? `/api/posts?type=${type}` : '/api/posts'
-    fetch(url)
+    setNewPostBanner(false)
+    const params = new URLSearchParams({ sort })
+    if (channel.type) params.set('type', channel.type)
+    if (channel.category) params.set('category', channel.category)
+    fetch(`/api/posts?${params}`)
       .then(r => r.json())
-      .then(data => { setPosts(data); setLoading(false) })
+      .then(data => { setPosts(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { loadPosts() }, [typeFilter])
+  useEffect(() => { loadPosts() }, [channelId, sort])
 
-  const categories = form.post_type === 'field_report' ? FIELD_REPORT_CATEGORIES : COMMUNITY_CATEGORIES
+  useEffect(() => {
+    if (!socket) return
+    socket.emit('join_channel', channelId)
+    const handler = () => setNewPostBanner(true)
+    socket.on('new_post', handler)
+    return () => {
+      socket.emit('leave_channel', channelId)
+      socket.off('new_post', handler)
+    }
+  }, [socket, channelId])
+
+  function handleGetLocation() {
+    if (!navigator.geolocation) return
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      pos => { setForm(f => ({ ...f, latitude: pos.coords.latitude.toFixed(5), longitude: pos.coords.longitude.toFixed(5) })); setLocating(false) },
+      () => setLocating(false),
+      { timeout: 8000 }
+    )
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!user) { navigate('/login'); return }
     setFormError(null)
     setSubmitting(true)
-
     try {
       const res = await fetch('/api/posts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       })
       const data = await res.json()
       if (!res.ok) { setFormError(data.error); return }
       setShowForm(false)
-      setForm({ post_type: 'community', category: '', title: '', body: '', location_label: '' })
+      setForm(f => ({ ...f, title: '', body: '', location_label: '', latitude: '', longitude: '' }))
       loadPosts()
     } catch {
       setFormError('Something went wrong.')
@@ -166,106 +279,266 @@ export default function Community() {
     color: 'var(--color-muted)', marginBottom: '5px', textTransform: 'uppercase' as const, letterSpacing: '0.05em',
   }
 
+  const isFixedChannel = !!(channel.type && channel.category)
+  const formCategories = form.post_type === 'field_report' ? FIELD_REPORT_CATEGORIES : CHANNELS.filter(c => c.type === 'community' && c.category).map(c => c.category!)
+
+  const displayed = search.trim()
+    ? posts.filter(p =>
+        p.title.toLowerCase().includes(search.toLowerCase()) ||
+        p.body.toLowerCase().includes(search.toLowerCase()) ||
+        (p.location_label ?? '').toLowerCase().includes(search.toLowerCase())
+      )
+    : posts
+
+  const SYSTEM_CHANNELS = CHANNELS.slice(0, 3)
+  const TOPIC_CHANNELS = CHANNELS.slice(3)
+
   return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '32px 20px' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 700, marginBottom: '4px' }}>Community</h1>
-          <p style={{ color: 'var(--color-muted)', fontSize: '14px' }}>Field reports, gear discussion, and regional prep</p>
-        </div>
-        <button onClick={() => { if (!user) navigate('/login'); else setShowForm(v => !v) }} style={{
-          padding: '9px 18px', borderRadius: '6px', fontFamily: 'var(--font-display)',
-          fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: 'none',
-          background: 'var(--color-accent)', color: '#0A0A0A',
-        }}>
-          {showForm ? 'Cancel' : '+ New Post'}
-        </button>
-      </div>
+    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
+      <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
 
-      {showForm && (
-        <form onSubmit={handleSubmit} style={{
-          background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-          borderRadius: '8px', padding: '24px', marginBottom: '24px',
-          display: 'flex', flexDirection: 'column', gap: '16px',
-        }}>
-          <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '16px', fontWeight: 600, margin: 0 }}>New Post</h2>
-
-          {formError && (
-            <div style={{ padding: '10px 14px', borderRadius: '6px', fontSize: '13px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--color-danger)' }}>
-              {formError}
+        {/* Sidebar -- desktop */}
+        {!isMobile && (
+          <div style={{ width: '190px', flexShrink: 0, position: 'sticky', top: '80px' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px', paddingLeft: '10px' }}>
+              Community
             </div>
-          )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-            <div>
-              <label style={labelStyle}>Type</label>
-              <select value={form.post_type} onChange={e => setForm(f => ({ ...f, post_type: e.target.value, category: '' }))} style={inputStyle}>
-                <option value="community">Community Post</option>
-                <option value="field_report">Field Report</option>
-                <option value="self_reported_news">News Report</option>
-              </select>
+            {SYSTEM_CHANNELS.map(ch => (
+              <button
+                key={ch.id}
+                onClick={() => selectChannel(ch.id)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '7px 10px', borderRadius: '5px', cursor: 'pointer', marginBottom: '1px',
+                  background: channelId === ch.id ? 'rgba(34,197,94,0.1)' : 'transparent',
+                  border: 'none',
+                  color: channelId === ch.id ? 'var(--color-text)' : 'var(--color-muted)',
+                  fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: channelId === ch.id ? 600 : 400,
+                  borderLeft: `2px solid ${channelId === ch.id ? 'var(--color-accent)' : 'transparent'}`,
+                }}
+              >
+                {ch.id === 'field' ? '! ' : ch.id === 'news' ? '~ ' : '# '}{ch.label}
+              </button>
+            ))}
+
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', margin: '16px 0 8px', paddingLeft: '10px' }}>
+              Topics
             </div>
-            <div>
-              <label style={labelStyle}>Category</label>
-              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} required style={inputStyle}>
-                <option value="">Select category...</option>
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-          </div>
 
-          <div>
-            <label style={labelStyle}>Title</label>
-            <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required placeholder="Clear, descriptive title" style={inputStyle} />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Body</label>
-            <textarea value={form.body} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} required rows={5}
-              placeholder="Details, context, what you're seeing..." style={{ ...inputStyle, resize: 'vertical' as const }} />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Location (optional)</label>
-            <input value={form.location_label} onChange={e => setForm(f => ({ ...f, location_label: e.target.value }))} placeholder="City, county, or region" style={inputStyle} />
-          </div>
-
-          <button type="submit" disabled={submitting} style={{
-            padding: '10px', borderRadius: '6px', fontFamily: 'var(--font-display)',
-            fontSize: '14px', fontWeight: 600, cursor: submitting ? 'not-allowed' : 'pointer',
-            background: submitting ? 'var(--color-border)' : 'var(--color-accent)',
-            color: submitting ? 'var(--color-muted)' : '#0A0A0A', border: 'none',
-          }}>
-            {submitting ? 'Posting...' : 'Submit Post'}
-          </button>
-        </form>
-      )}
-
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', flexWrap: 'wrap' }}>
-        {FILTERS.map(f => (
-          <button key={f.key} onClick={() => setTypeFilter(f.key)} style={{
-            padding: '5px 14px', borderRadius: '4px', fontSize: '12px',
-            fontFamily: 'var(--font-display)', cursor: 'pointer',
-            border: `1px solid ${typeFilter === f.key ? 'var(--color-accent)' : 'var(--color-border)'}`,
-            background: typeFilter === f.key ? 'rgba(34,197,94,0.1)' : 'transparent',
-            color: typeFilter === f.key ? 'var(--color-accent)' : 'var(--color-muted)',
-            textTransform: 'uppercase', letterSpacing: '0.04em',
-          }}>
-            {f.label}
-          </button>
-        ))}
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', alignSelf: 'center' }}>
-          {loading ? 'Loading...' : `${posts.length} posts`}
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {posts.map(p => <PostCard key={p.id} post={p} />)}
-        {!loading && posts.length === 0 && (
-          <div style={{ color: 'var(--color-muted)', textAlign: 'center', padding: '60px 0', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
-            No posts yet. Be the first.
+            {TOPIC_CHANNELS.map(ch => (
+              <button
+                key={ch.id}
+                onClick={() => selectChannel(ch.id)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '6px 10px', borderRadius: '5px', cursor: 'pointer', marginBottom: '1px',
+                  background: channelId === ch.id ? 'rgba(34,197,94,0.1)' : 'transparent',
+                  border: 'none',
+                  color: channelId === ch.id ? 'var(--color-text)' : 'var(--color-muted)',
+                  fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: channelId === ch.id ? 600 : 400,
+                  borderLeft: `2px solid ${channelId === ch.id ? 'var(--color-accent)' : 'transparent'}`,
+                }}
+              >
+                # {ch.label}
+              </button>
+            ))}
           </div>
         )}
+
+        {/* Main content */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+            <div>
+              {isMobile ? (
+                <select
+                  value={channelId}
+                  onChange={e => selectChannel(e.target.value)}
+                  style={{ ...inputStyle, width: 'auto', fontSize: '15px', fontWeight: 600, paddingLeft: '8px' }}
+                >
+                  {SYSTEM_CHANNELS.map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)}
+                  <option disabled>-- Topics --</option>
+                  {TOPIC_CHANNELS.map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)}
+                </select>
+              ) : (
+                <div>
+                  <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '2px' }}>
+                    {channel.id === 'all' ? '# ' : channel.type === 'field_report' ? '! ' : channel.type === 'self_reported_news' ? '~ ' : '# '}{channel.label}
+                  </h1>
+                  {loading ? null : (
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>
+                      {posts.length} post{posts.length !== 1 ? 's' : ''}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => { if (!user) navigate('/login'); else setShowForm(v => !v) }}
+              style={{
+                padding: '8px 16px', borderRadius: '6px', fontFamily: 'var(--font-display)',
+                fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                background: showForm ? 'var(--color-surface)' : 'var(--color-accent)',
+                color: showForm ? 'var(--color-muted)' : '#0A0A0A',
+                border: showForm ? '1px solid var(--color-border)' : 'none',
+              }}
+            >
+              {showForm ? 'Cancel' : '+ Post'}
+            </button>
+          </div>
+
+          {/* Post form */}
+          {showForm && (
+            <form onSubmit={handleSubmit} style={{
+              background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+              borderRadius: '8px', padding: '20px', marginBottom: '20px',
+              display: 'flex', flexDirection: 'column', gap: '14px',
+            }}>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>
+                New post in {channel.label}
+              </div>
+
+              {formError && (
+                <div style={{ padding: '10px 14px', borderRadius: '6px', fontSize: '13px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--color-danger)' }}>
+                  {formError}
+                </div>
+              )}
+
+              {/* Type + category -- only shown when not a fixed channel */}
+              {!isFixedChannel && (
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={labelStyle}>Type</label>
+                    <select value={form.post_type} onChange={e => setForm(f => ({ ...f, post_type: e.target.value, category: '' }))} style={inputStyle}>
+                      <option value="community">Community Post</option>
+                      <option value="field_report">Field Report</option>
+                      <option value="self_reported_news">News Report</option>
+                    </select>
+                  </div>
+                  {form.post_type !== 'self_reported_news' && (
+                    <div>
+                      <label style={labelStyle}>Category</label>
+                      <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} required style={inputStyle}>
+                        <option value="">Select...</option>
+                        {formCategories.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label style={labelStyle}>Title</label>
+                <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required placeholder="Clear, descriptive title" style={inputStyle} />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Body</label>
+                <textarea value={form.body} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} required rows={4}
+                  placeholder="Details, context, what you're seeing..." style={{ ...inputStyle, resize: 'vertical' as const }} />
+              </div>
+
+              <div>
+                <label style={labelStyle}>Location (optional)</label>
+                <input value={form.location_label} onChange={e => setForm(f => ({ ...f, location_label: e.target.value }))} placeholder="City, county, or region" style={inputStyle} />
+              </div>
+
+              {form.post_type === 'field_report' && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                    <label style={{ ...labelStyle, marginBottom: 0 }}>Pin to Map (optional)</label>
+                    <button type="button" onClick={handleGetLocation} disabled={locating} style={{
+                      padding: '3px 10px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)',
+                      cursor: locating ? 'not-allowed' : 'pointer', border: '1px solid var(--color-border)',
+                      background: 'transparent', color: locating ? 'var(--color-subtle)' : 'var(--color-accent)',
+                    }}>
+                      {locating ? 'Locating...' : 'Use my location'}
+                    </button>
+                    {form.latitude && (
+                      <button type="button" onClick={() => setForm(f => ({ ...f, latitude: '', longitude: '' }))} style={{
+                        padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)',
+                        cursor: 'pointer', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-subtle)',
+                      }}>Clear</button>
+                    )}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
+                    <input value={form.latitude} onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))} placeholder="Latitude" style={inputStyle} />
+                    <input value={form.longitude} onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))} placeholder="Longitude" style={inputStyle} />
+                  </div>
+                  {form.latitude && <div style={{ marginTop: '5px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-accent)' }}>Will appear as a pin on the map</div>}
+                </div>
+              )}
+
+              <button type="submit" disabled={submitting} style={{
+                padding: '10px', borderRadius: '6px', fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600,
+                cursor: submitting ? 'not-allowed' : 'pointer',
+                background: submitting ? 'var(--color-border)' : 'var(--color-accent)',
+                color: submitting ? 'var(--color-muted)' : '#0A0A0A', border: 'none',
+              }}>
+                {submitting ? 'Posting...' : 'Submit Post'}
+              </button>
+            </form>
+          )}
+
+          {/* New post banner */}
+          {newPostBanner && (
+            <button
+              onClick={() => { setNewPostBanner(false); loadPosts() }}
+              style={{
+                width: '100%', marginBottom: '10px', padding: '9px 16px',
+                background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)',
+                borderRadius: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+                fontSize: '12px', color: 'var(--color-accent)', textAlign: 'center',
+                letterSpacing: '0.03em',
+              }}
+            >
+              New posts available -- click to refresh
+            </button>
+          )}
+
+          {/* Sort + search */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+            {SORTS.map(s => (
+              <button key={s.key} onClick={() => setSort(s.key)} style={{
+                padding: '5px 12px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-display)',
+                cursor: 'pointer', letterSpacing: '0.03em', fontWeight: sort === s.key ? 600 : 400,
+                border: `1px solid ${sort === s.key ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                background: sort === s.key ? 'rgba(34,197,94,0.1)' : 'transparent',
+                color: sort === s.key ? 'var(--color-accent)' : 'var(--color-muted)',
+              }}>
+                {s.label}
+              </button>
+            ))}
+            <input
+              type="text"
+              placeholder="Search..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{
+                marginLeft: 'auto', padding: '5px 12px', borderRadius: '4px', width: '160px',
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+                color: 'var(--color-text)', fontSize: '13px', fontFamily: 'var(--font-body)', outline: 'none',
+              }}
+            />
+          </div>
+
+          {/* Posts */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {loading ? (
+              <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>
+                Loading...
+              </div>
+            ) : displayed.length === 0 ? (
+              <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '60px 0', textAlign: 'center' }}>
+                {search ? `No posts match "${search}".` : 'No posts yet. Be the first.'}
+              </div>
+            ) : (
+              displayed.map(p => <PostCard key={p.id} post={p} currentUser={user} />)
+            )}
+          </div>
+        </div>
       </div>
     </div>
   )

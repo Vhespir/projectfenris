@@ -25,15 +25,22 @@ services:
       network: host
     container_name: fenris_api
     restart: unless-stopped
+    network_mode: host
     environment:
-      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3001
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      BASE_URL: ${BASE_URL}
+      AIRNOW_API_KEY: ${AIRNOW_API_KEY}
+    volumes:
+      - ./api:/app
+      - /app/node_modules
+      - uploads-data:/app/uploads
     depends_on:
       db:
         condition: service_healthy
-    networks:
-      - fenris-network
 
   worker:
     build:
@@ -45,6 +52,12 @@ services:
     environment:
       DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@127.0.0.1:5432/${DB_NAME}
       AIRNOW_API_KEY: ${AIRNOW_API_KEY}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+      BASE_URL: ${BASE_URL}
+    volumes:
+      - ./worker:/app
+      - /app/node_modules
     depends_on:
       db:
         condition: service_healthy
@@ -61,6 +74,7 @@ services:
       NODE_ENV: development
     volumes:
       - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
     networks:
       - fenris-network
 
@@ -68,19 +82,16 @@ services:
     image: nginx:alpine
     container_name: fenris_nginx
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
+    network_mode: host
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - api
-    networks:
-      - fenris-network
 
 volumes:
   postgres-data:
+  uploads-data:
 
 networks:
   fenris-network:

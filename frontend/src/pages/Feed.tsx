@@ -1,4 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
+import { Link } from 'react-router-dom'
+import { useIsMobile } from '../hooks/useIsMobile'
+import { useAuth } from '../context/AuthContext'
+import { getTier } from '../utils/tier'
+
+interface GeoJSON {
+  type: string
+  coordinates: unknown
+}
 
 interface EventItem {
   id: number
@@ -9,6 +18,36 @@ interface EventItem {
   fetched_at: string
   expires_at: string | null
   properties: Record<string, unknown>
+  geometry: GeoJSON | null
+}
+
+const RADIUS_OPTIONS = [100, 250, 500, 1000]
+
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.asin(Math.sqrt(a))
+}
+
+function eventCentroid(geom: GeoJSON | null): [number, number] | null {
+  if (!geom) return null
+  const coords = geom.coordinates
+  if (geom.type === 'Point') {
+    const [lon, lat] = coords as number[]
+    return [lat, lon]
+  }
+  let ring: number[][]
+  if (geom.type === 'Polygon') ring = (coords as number[][][])[0]
+  else if (geom.type === 'MultiPolygon') ring = (coords as number[][][][])[0][0]
+  else return null
+  const lats = ring.map(c => c[1])
+  const lons = ring.map(c => c[0])
+  return [
+    (Math.min(...lats) + Math.max(...lats)) / 2,
+    (Math.min(...lons) + Math.max(...lons)) / 2,
+  ]
 }
 
 interface NewsItem {
@@ -22,22 +61,34 @@ interface NewsItem {
   published_at: string | null
 }
 
+interface PostItem {
+  id: number
+  post_type: string
+  category: string
+  title: string
+  body: string
+  location_label: string | null
+  upvote_count: number
+  created_at: string
+  username: string | null
+  reputation: number
+  is_founding_member?: boolean
+}
+
 type FeedItem =
   | ({ kind: 'event' } & EventItem)
   | ({ kind: 'news' } & NewsItem)
+  | ({ kind: 'post' } & PostItem)
 
 const SEVERITY_COLOR: Record<string, string> = {
-  Extreme: 'var(--color-danger)',
-  Severe: 'var(--color-danger)',
+  Extreme:  'var(--color-danger)',
+  Severe:   'var(--color-danger)',
   Moderate: 'var(--color-warning)',
-  Minor: 'var(--color-accent)',
+  Minor:    'var(--color-accent)',
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  noaa: 'NOAA',
-  usgs: 'USGS',
-  fema: 'FEMA',
-  epa: 'EPA',
+  noaa: 'NOAA', usgs: 'USGS', gdacs: 'GDACS', epa: 'EPA',
 }
 
 function timeAgo(iso: string) {
@@ -69,37 +120,33 @@ function SourceBadge({ label, verified }: { label: string; verified: boolean }) 
 function EventCard({ item }: { item: EventItem }) {
   const color = SEVERITY_COLOR[item.severity] ?? 'var(--color-muted)'
   const p = item.properties as Record<string, string>
-  const areaDesc = p.areaDesc
 
   return (
     <div style={{
       background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-      borderRadius: '6px', padding: '16px 20px',
+      borderRadius: '6px', padding: '14px 18px',
       borderLeft: `3px solid ${color}`,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-        <SourceBadge label={SOURCE_LABEL[item.source] ?? item.source} verified={true} />
-        <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)' }}>
-          {item.event_type}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '7px', flexWrap: 'wrap' }}>
+        <SourceBadge label={SOURCE_LABEL[item.source] ?? item.source.toUpperCase()} verified={true} />
+        <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          {item.event_type.replace(/_/g, ' ')}
         </span>
-        <span style={{
-          marginLeft: 'auto', fontSize: '11px',
-          color, fontFamily: 'var(--font-mono)', fontWeight: 600,
-        }}>
+        <span style={{ marginLeft: 'auto', fontSize: '11px', color, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
           {item.severity}
         </span>
       </div>
-      <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '6px', lineHeight: 1.4 }}>
+      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '5px', lineHeight: 1.4 }}>
         {item.title}
       </div>
-      {areaDesc && (
-        <div style={{ fontSize: '13px', color: 'var(--color-muted)', marginBottom: '6px' }}>
-          {areaDesc.length > 120 ? areaDesc.slice(0, 120) + '...' : areaDesc}
+      {p.areaDesc && (
+        <div style={{ fontSize: '12px', color: 'var(--color-muted)', marginBottom: '5px' }}>
+          {p.areaDesc.length > 120 ? p.areaDesc.slice(0, 120) + '...' : p.areaDesc}
         </div>
       )}
-      <div style={{ fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+      <div style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
         {timeAgo(item.fetched_at)}
-        {item.expires_at && ` · expires ${timeAgo(item.expires_at).replace(' ago', '')}`}
+        {item.expires_at && ` · expires ${new Date(item.expires_at).toLocaleString()}`}
       </div>
     </div>
   )
@@ -107,42 +154,32 @@ function EventCard({ item }: { item: EventItem }) {
 
 function NewsCard({ item }: { item: NewsItem }) {
   return (
-    <a
-      href={item.url ?? '#'}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{ textDecoration: 'none', display: 'block' }}
-    >
-      <div style={{
-        background: 'var(--color-surface)', border: '1px solid var(--color-border)',
-        borderRadius: '6px', padding: '16px 20px',
-        transition: 'border-color 0.15s',
-      }}
+    <a href={item.url ?? '#'} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', display: 'block' }}>
+      <div
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '14px 18px', transition: 'border-color 0.15s' }}
         onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--color-accent)')}
         onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '7px', flexWrap: 'wrap' }}>
           <SourceBadge label={item.source} verified={true} />
           {item.category && (
-            <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)' }}>
+            <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               {item.category}
             </span>
           )}
-          {item.region && (
-            <span style={{ fontSize: '11px', color: 'var(--color-muted)' }}>{item.region}</span>
+          {item.region && <span style={{ fontSize: '11px', color: 'var(--color-muted)' }}>{item.region}</span>}
+          {item.published_at && (
+            <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+              {timeAgo(item.published_at)}
+            </span>
           )}
         </div>
-        <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '6px', lineHeight: 1.4 }}>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '5px', lineHeight: 1.4 }}>
           {item.title}
         </div>
         {item.summary && (
-          <div style={{ fontSize: '13px', color: 'var(--color-muted)', marginBottom: '6px', lineHeight: 1.5 }}>
+          <div style={{ fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.5 }}>
             {item.summary.length > 160 ? item.summary.slice(0, 160) + '...' : item.summary}
-          </div>
-        )}
-        {item.published_at && (
-          <div style={{ fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
-            {timeAgo(item.published_at)}
           </div>
         )}
       </div>
@@ -150,102 +187,545 @@ function NewsCard({ item }: { item: NewsItem }) {
   )
 }
 
-const FILTERS = ['all', 'noaa', 'usgs', 'fema', 'news'] as const
-type Filter = typeof FILTERS[number]
+const POST_TYPE_COLOR: Record<string, string> = {
+  field_report:        '#F59E0B',
+  self_reported_news:  '#3B82F6',
+}
+const POST_TYPE_LABEL: Record<string, string> = {
+  field_report:        'Field Report',
+  self_reported_news:  'Community Report',
+}
+
+function PostCard({ item }: { item: PostItem }) {
+  const color = POST_TYPE_COLOR[item.post_type] ?? 'var(--color-muted)'
+  const label = POST_TYPE_LABEL[item.post_type] ?? item.post_type
+  return (
+    <Link to={`/post/${item.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+      <div
+        style={{
+          background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+          borderRadius: '6px', padding: '14px 18px',
+          borderLeft: `3px solid ${color}`, transition: 'border-color 0.15s',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.borderColor = color)}
+        onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '7px', flexWrap: 'wrap' }}>
+          <SourceBadge label={label} verified={false} />
+          <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {item.category.replace(/_/g, ' ')}
+          </span>
+          {item.location_label && (
+            <span style={{ fontSize: '11px', color: 'var(--color-muted)' }}>{item.location_label}</span>
+          )}
+          <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+            {timeAgo(item.created_at)}
+          </span>
+        </div>
+        <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '5px', lineHeight: 1.4 }}>
+          {item.title}
+        </div>
+        {item.body && (
+          <div style={{ fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.5 }}>
+            {item.body.length > 160 ? item.body.slice(0, 160) + '...' : item.body}
+          </div>
+        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', marginTop: '6px' }}>
+          {item.upvote_count > 0 && <span style={{ color: 'var(--color-accent)' }}>{item.upvote_count} signal</span>}
+          {item.username && (
+            <>
+              {item.upvote_count > 0 && <span>·</span>}
+              <span>{item.username}</span>
+              {(() => { const t = getTier(item.reputation ?? 0); return t ? (
+                <span style={{ fontSize: '8px', fontFamily: 'var(--font-mono)', padding: '1px 4px', borderRadius: '3px', background: `${t.color}18`, color: t.color, border: `1px solid ${t.color}40`, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  {t.short}
+                </span>
+              ) : null })()}
+              {item.is_founding_member && (
+                <span style={{ fontSize: '9px', fontFamily: 'var(--font-mono)', padding: '1px 5px', borderRadius: '3px', background: '#A78BFA18', color: '#A78BFA', border: '1px solid #A78BFA40', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Founder
+                </span>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </Link>
+  )
+}
+
+const SOURCE_FILTERS = ['noaa', 'usgs', 'gdacs', 'epa'] as const
+const SEVERITY_LEVELS = ['Extreme', 'Severe', 'Moderate', 'Minor'] as const
+const NEWS_TIER2_SOURCES = ['NPR', 'PBS', 'Reuters', 'Sky News'] as const
+
+function SidebarLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px', marginTop: '18px' }}>
+      {children}
+    </div>
+  )
+}
+
+function FilterBtn({ active, color, children, onClick }: { active: boolean; color?: string; children: React.ReactNode; onClick: () => void }) {
+  const accentColor = color ?? 'var(--color-accent)'
+  return (
+    <button onClick={onClick} style={{
+      width: '100%', textAlign: 'left', padding: '5px 10px', borderRadius: '4px', fontSize: '11px',
+      fontFamily: 'var(--font-mono)', cursor: 'pointer',
+      border: `1px solid ${active ? accentColor + '60' : 'var(--color-border)'}`,
+      background: active ? accentColor + '14' : 'transparent',
+      color: active ? accentColor : 'var(--color-subtle)',
+      transition: 'all 0.15s',
+    }}>
+      {children}
+    </button>
+  )
+}
 
 export default function FeedPage() {
+  const isMobile = useIsMobile()
+  const { user } = useAuth()
+  const hasLocation = !!(user?.user_lat && user?.user_lon)
   const [events, setEvents] = useState<EventItem[]>([])
   const [news, setNews] = useState<NewsItem[]>([])
+  const [posts, setPosts] = useState<PostItem[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<Filter>('all')
-  const [severityFilter, setSeverityFilter] = useState<string>('all')
+  const [showFilters, setShowFilters] = useState(false)
+  const [nearMe, setNearMe] = useState(true)
+  const [nearMeKm, setNearMeKm] = useState(500)
+
+  const [showEvents, setShowEvents] = useState(true)
+  const [showNews, setShowNews] = useState(true)
+  const [showFieldReports, setShowFieldReports] = useState(true)
+  const [showCommunityReports, setShowCommunityReports] = useState(true)
+  const [activeSources, setActiveSources] = useState<Set<string>>(new Set())
+  const [activeSeverities, setActiveSeverities] = useState<Set<string>>(new Set())
+  const [activeEventTypes, setActiveEventTypes] = useState<Set<string>>(new Set())
+  const [activeNewsCategories, setActiveNewsCategories] = useState<Set<string>>(new Set())
+  const [hiddenNewsSources, setHiddenNewsSources] = useState<Set<string>>(new Set())
+  const [keywordFilterOn, setKeywordFilterOn] = useState(false)
+  const [kwInput, setKwInput] = useState('')
+  const initKeywords = ((user?.preferences as Record<string, unknown> | undefined)?.feed as { keywords?: string[] } | undefined)?.keywords ?? []
+  const [savedKeywords, setSavedKeywords] = useState<string[]>(initKeywords)
+
+  useEffect(() => {
+    const kws = ((user?.preferences as Record<string, unknown> | undefined)?.feed as { keywords?: string[] } | undefined)?.keywords
+    if (Array.isArray(kws)) setSavedKeywords(kws)
+  }, [user?.id])
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/events?limit=200').then(r => r.json()),
+      fetch('/api/events?sources=noaa,usgs,gdacs,epa&limit=500').then(r => r.json()),
       fetch('/api/news?limit=100').then(r => r.json()),
-    ]).then(([evts, nws]) => {
-      setEvents(evts)
-      setNews(nws)
+      fetch('/api/posts?limit=200').then(r => r.json()),
+    ]).then(([evts, nws, psts]) => {
+      setEvents(Array.isArray(evts) ? evts : [])
+      setNews(Array.isArray(nws) ? nws : [])
+      const community = Array.isArray(psts)
+        ? psts.filter((p: PostItem) => p.post_type === 'field_report' || p.post_type === 'self_reported_news')
+        : []
+      setPosts(community)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
 
-  const combined: FeedItem[] = [
+  function toggle<T>(set: Set<T>, val: T): Set<T> {
+    const n = new Set(set); n.has(val) ? n.delete(val) : n.add(val); return n
+  }
+
+  const eventTypes = useMemo(() => {
+    const types = new Set(events.map(e => e.event_type))
+    return Array.from(types).sort()
+  }, [events])
+
+  const newsCategories = useMemo(() => {
+    const cats = new Set(news.map(n => n.category).filter(Boolean) as string[])
+    return Array.from(cats).sort()
+  }, [news])
+
+const combined: FeedItem[] = useMemo(() => [
     ...events.map(e => ({ kind: 'event' as const, ...e })),
     ...news.map(n => ({ kind: 'news' as const, ...n })),
+    ...posts.map(p => ({ kind: 'post' as const, ...p })),
   ].sort((a, b) => {
-    const dateA = a.kind === 'event' ? a.fetched_at : (a.published_at ?? a.fetched_at ?? '')
-    const dateB = b.kind === 'event' ? b.fetched_at : (b.published_at ?? b.fetched_at ?? '')
+    const dateA = a.kind === 'event' ? a.fetched_at : a.kind === 'news' ? (a.published_at ?? '') : a.created_at
+    const dateB = b.kind === 'event' ? b.fetched_at : b.kind === 'news' ? (b.published_at ?? '') : b.created_at
     return new Date(dateB).getTime() - new Date(dateA).getTime()
-  })
+  }), [events, news, posts])
 
-  const filtered = combined.filter(item => {
-    if (filter === 'news') return item.kind === 'news'
-    if (filter !== 'all' && item.kind === 'event' && item.source !== filter) return false
-    if (filter !== 'all' && item.kind === 'news') return false
-    if (severityFilter !== 'all' && item.kind === 'event' && item.severity !== severityFilter) return false
+  const filtered = useMemo(() => combined.filter(item => {
+    if (item.kind === 'event') {
+      if (!showEvents) return false
+      if (activeSources.size > 0 && !activeSources.has(item.source)) return false
+      if (activeSeverities.size > 0 && !activeSeverities.has(item.severity)) return false
+      if (activeEventTypes.size > 0 && !activeEventTypes.has(item.event_type)) return false
+      if (hasLocation && nearMe && user?.user_lat && user?.user_lon) {
+        const centroid = eventCentroid(item.geometry)
+        if (!centroid) return false
+        if (haversine(user.user_lat, user.user_lon, centroid[0], centroid[1]) > nearMeKm) return false
+      }
+    }
+    if (item.kind === 'news') {
+      if (!showNews) return false
+      if (hiddenNewsSources.has(item.source)) return false
+      if (item.category && activeNewsCategories.size > 0 && !activeNewsCategories.has(item.category)) return false
+    }
+    if (item.kind === 'post') {
+      if (item.post_type === 'field_report' && !showFieldReports) return false
+      if (item.post_type === 'self_reported_news' && !showCommunityReports) return false
+    }
+    if (keywordFilterOn && savedKeywords.length > 0) {
+      let text = ''
+      if (item.kind === 'event') text = `${item.title} ${item.event_type} ${(item.properties as Record<string, string>).areaDesc ?? ''}`
+      else if (item.kind === 'news') text = `${item.title} ${item.summary ?? ''} ${item.category ?? ''}`
+      else text = `${item.title} ${item.body}`
+      const lower = text.toLowerCase()
+      if (!savedKeywords.some(kw => lower.includes(kw))) return false
+    }
     return true
-  })
+  }), [combined, showEvents, showNews, showFieldReports, showCommunityReports, activeSources, activeSeverities, activeEventTypes, activeNewsCategories, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords])
 
-  return (
-    <div style={{ maxWidth: '800px', margin: '0 auto', padding: '32px 20px' }}>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', fontWeight: 700, marginBottom: '4px' }}>
-          Live Feed
-        </h1>
-        <p style={{ color: 'var(--color-muted)', fontSize: '14px' }}>
-          Verified alerts and news from official sources
-        </p>
+  const severeCounts = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
+
+  async function saveKeywords(kws: string[]) {
+    if (!user) return
+    await fetch('/api/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferences: { feed: { keywords: kws } } }),
+    }).catch(() => {})
+  }
+
+  function addKeyword() {
+    const kw = kwInput.trim().toLowerCase()
+    if (!kw || savedKeywords.includes(kw)) { setKwInput(''); return }
+    const next = [...savedKeywords, kw]
+    setSavedKeywords(next)
+    setKwInput('')
+    saveKeywords(next)
+  }
+
+  function removeKeyword(kw: string) {
+    const next = savedKeywords.filter(k => k !== kw)
+    setSavedKeywords(next)
+    if (next.length === 0) setKeywordFilterOn(false)
+    saveKeywords(next)
+  }
+
+  function resetFilters() {
+    setShowEvents(true); setShowNews(true)
+    setShowFieldReports(true); setShowCommunityReports(true)
+    setNearMe(true)
+    setActiveSources(new Set())
+    setActiveSeverities(new Set())
+    setActiveEventTypes(new Set())
+    setActiveNewsCategories(new Set())
+    setHiddenNewsSources(new Set())
+    setKeywordFilterOn(false)
+  }
+
+  const locationLabel = [user?.region_county, user?.region_state].filter(Boolean).join(', ')
+
+  const filterContent = (
+    <>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 600, color: 'var(--color-muted)', letterSpacing: '0.04em', marginBottom: '12px' }}>
+        Filters
       </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-        {FILTERS.map(f => (
-          <button key={f} onClick={() => setFilter(f)} style={{
-            padding: '5px 14px', borderRadius: '4px', fontSize: '12px',
-            fontFamily: 'var(--font-display)', cursor: 'pointer',
-            border: `1px solid ${filter === f ? 'var(--color-accent)' : 'var(--color-border)'}`,
-            background: filter === f ? 'rgba(34,197,94,0.1)' : 'transparent',
-            color: filter === f ? 'var(--color-accent)' : 'var(--color-muted)',
-            textTransform: 'uppercase', letterSpacing: '0.04em',
-          }}>
-            {f === 'all' ? 'All' : f.toUpperCase()}
-          </button>
-        ))}
+      {hasLocation && (
+        <>
+          <SidebarLabel>Location</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '4px' }}>
+            <FilterBtn active={nearMe} onClick={() => setNearMe(v => !v)}>
+              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Near Me</span>
+                <span style={{ color: 'var(--color-subtle)' }}>{nearMeKm}km</span>
+              </span>
+            </FilterBtn>
+          </div>
+          {nearMe && (
+            <div style={{ display: 'flex', gap: '4px', marginBottom: '4px', paddingLeft: '2px' }}>
+              {RADIUS_OPTIONS.map(r => (
+                <button
+                  key={r}
+                  onClick={() => setNearMeKm(r)}
+                  style={{
+                    flex: 1, padding: '4px 0', borderRadius: '5px', cursor: 'pointer', fontSize: '10px',
+                    fontFamily: 'var(--font-mono)', fontWeight: nearMeKm === r ? 700 : 400,
+                    background: nearMeKm === r ? 'var(--color-accent)' : 'var(--color-surface)',
+                    color: nearMeKm === r ? '#0A0A0A' : 'var(--color-subtle)',
+                    border: `1px solid ${nearMeKm === r ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                  }}
+                >
+                  {r >= 1000 ? '1k' : r}
+                </button>
+              ))}
+            </div>
+          )}
+          {locationLabel && (
+            <div style={{ fontSize: '10px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', padding: '2px 10px', marginBottom: '4px' }}>
+              {locationLabel}
+            </div>
+          )}
+        </>
+      )}
 
-        {(filter === 'all' || ['noaa', 'usgs', 'fema'].includes(filter)) && (
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
-            {['all', 'Extreme', 'Severe', 'Moderate', 'Minor'].map(s => (
-              <button key={s} onClick={() => setSeverityFilter(s)} style={{
-                padding: '5px 10px', borderRadius: '4px', fontSize: '11px',
-                fontFamily: 'var(--font-mono)', cursor: 'pointer',
-                border: `1px solid ${severityFilter === s ? (SEVERITY_COLOR[s] ?? 'var(--color-accent)') : 'var(--color-border)'}`,
-                background: severityFilter === s ? `${SEVERITY_COLOR[s]}18` : 'transparent',
-                color: severityFilter === s ? (SEVERITY_COLOR[s] ?? 'var(--color-accent)') : 'var(--color-muted)',
-              }}>
-                {s === 'all' ? 'All Severity' : s}
-              </button>
+      <SidebarLabel>Content</SidebarLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <FilterBtn active={showEvents} onClick={() => setShowEvents(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Events</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{events.length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showNews} onClick={() => setShowNews(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>News</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{news.length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showFieldReports} color="#F59E0B" onClick={() => setShowFieldReports(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Field Reports</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'field_report').length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showCommunityReports} color="#3B82F6" onClick={() => setShowCommunityReports(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Community Reports</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'self_reported_news').length}</span>
+          </span>
+        </FilterBtn>
+      </div>
+
+      {showEvents && (
+        <>
+          <SidebarLabel>Source</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {SOURCE_FILTERS.map(src => (
+              <FilterBtn key={src} active={activeSources.has(src)} onClick={() => setActiveSources(s => toggle(s, src))}>
+                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{SOURCE_LABEL[src]}</span>
+                  <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.source === src).length}</span>
+                </span>
+              </FilterBtn>
             ))}
           </div>
-        )}
-      </div>
 
-      <div style={{ fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', marginBottom: '20px' }}>
-        {loading ? 'Loading...' : `${filtered.length} items`}
-      </div>
+          <SidebarLabel>Severity</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {SEVERITY_LEVELS.map(s => {
+              const c = s === 'Extreme' || s === 'Severe' ? '#EF4444' : s === 'Moderate' ? '#F59E0B' : '#22C55E'
+              return (
+                <FilterBtn key={s} active={activeSeverities.has(s)} color={c} onClick={() => setActiveSeverities(set => toggle(set, s))}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{s}</span>
+                    <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.severity === s).length}</span>
+                  </span>
+                </FilterBtn>
+              )
+            })}
+          </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {filtered.map(item =>
-          item.kind === 'event'
-            ? <EventCard key={`e-${item.id}`} item={item} />
-            : <NewsCard key={`n-${item.id}`} item={item} />
-        )}
-        {!loading && filtered.length === 0 && (
-          <div style={{ color: 'var(--color-muted)', textAlign: 'center', padding: '60px 0', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
-            No items match the current filter
+          {eventTypes.length > 0 && (
+            <>
+              <SidebarLabel>Event Type</SidebarLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {eventTypes.map(type => (
+                  <FilterBtn key={type} active={activeEventTypes.has(type)} onClick={() => setActiveEventTypes(s => toggle(s, type))}>
+                    <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ textTransform: 'capitalize' }}>{type.replace(/_/g, ' ')}</span>
+                      <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.event_type === type).length}</span>
+                    </span>
+                  </FilterBtn>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {showNews && (
+        <>
+          <SidebarLabel>News Source</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {NEWS_TIER2_SOURCES.map(src => {
+              const count = news.filter(n => n.source === src).length
+              if (count === 0) return null
+              const hidden = hiddenNewsSources.has(src)
+              return (
+                <FilterBtn key={src} active={!hidden} onClick={() => setHiddenNewsSources(s => toggle(s, src))}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{src}</span>
+                    <span style={{ color: 'var(--color-subtle)' }}>{count}</span>
+                  </span>
+                </FilterBtn>
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {showNews && newsCategories.length > 0 && (
+        <>
+          <SidebarLabel>News Category</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {newsCategories.map(cat => (
+              <FilterBtn key={cat} active={activeNewsCategories.has(cat)} onClick={() => setActiveNewsCategories(s => toggle(s, cat))}>
+                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ textTransform: 'capitalize' }}>{cat}</span>
+                  <span style={{ color: 'var(--color-subtle)' }}>{news.filter(n => n.category === cat).length}</span>
+                </span>
+              </FilterBtn>
+            ))}
+          </div>
+        </>
+      )}
+
+      {user && (
+        <>
+          <SidebarLabel>Keywords</SidebarLabel>
+          {savedKeywords.length > 0 && (
+            <FilterBtn active={keywordFilterOn} onClick={() => setKeywordFilterOn(v => !v)}>
+              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>Keyword filter</span>
+                <span style={{ color: 'var(--color-subtle)' }}>{savedKeywords.length}</span>
+              </span>
+            </FilterBtn>
+          )}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '5px' }}>
+            {savedKeywords.map(kw => (
+              <span key={kw} style={{
+                display: 'inline-flex', alignItems: 'center', gap: '4px',
+                fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '3px',
+                background: keywordFilterOn ? 'rgba(34,197,94,0.1)' : 'rgba(113,113,122,0.1)',
+                color: keywordFilterOn ? 'var(--color-accent)' : 'var(--color-subtle)',
+                border: `1px solid ${keywordFilterOn ? 'rgba(34,197,94,0.25)' : 'var(--color-border)'}`,
+              }}>
+                {kw}
+                <button
+                  onClick={() => removeKeyword(kw)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-subtle)', padding: 0, fontSize: '12px', lineHeight: 1, display: 'flex', alignItems: 'center' }}
+                >
+                  &times;
+                </button>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: '4px', marginTop: '6px' }}>
+            <input
+              type="text"
+              value={kwInput}
+              onChange={e => setKwInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addKeyword() } }}
+              placeholder="Add keyword..."
+              style={{
+                flex: 1, padding: '4px 8px', borderRadius: '4px', fontSize: '11px',
+                fontFamily: 'var(--font-mono)', background: 'var(--color-surface)',
+                border: '1px solid var(--color-border)', color: 'var(--color-text)', outline: 'none',
+                minWidth: 0,
+              }}
+            />
+            <button
+              onClick={addKeyword}
+              disabled={!kwInput.trim()}
+              style={{
+                padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)',
+                cursor: kwInput.trim() ? 'pointer' : 'not-allowed', flexShrink: 0,
+                border: '1px solid var(--color-border)', background: 'transparent',
+                color: kwInput.trim() ? 'var(--color-text)' : 'var(--color-subtle)',
+              }}
+            >
+              +
+            </button>
+          </div>
+        </>
+      )}
+
+      <button onClick={resetFilters} style={{
+        marginTop: '16px', width: '100%', padding: '5px 10px', borderRadius: '4px',
+        fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer',
+        border: '1px solid var(--color-border)', background: 'transparent',
+        color: 'var(--color-subtle)', transition: 'color 0.15s',
+      }}>
+        Reset filters
+      </button>
+    </>
+  )
+
+  return (
+    <div style={{
+      maxWidth: '1200px', margin: '0 auto', padding: '28px 24px',
+      display: isMobile ? 'block' : 'grid',
+      gridTemplateColumns: isMobile ? undefined : '1fr 220px',
+      gap: isMobile ? undefined : '32px',
+      alignItems: isMobile ? undefined : 'start',
+    }}>
+      {/* Main column */}
+      <div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+          <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 700, color: 'var(--color-text)', margin: 0 }}>
+            Live Feed
+          </h1>
+          {severeCounts > 0 && (
+            <span style={{
+              fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-danger)',
+              background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.25)',
+              borderRadius: '4px', padding: '2px 8px',
+            }}>
+              {severeCounts} severe
+            </span>
+          )}
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>
+            {loading ? '...' : `${filtered.length} items`}
+          </span>
+          {isMobile && (
+            <button
+              onClick={() => setShowFilters(v => !v)}
+              style={{
+                fontFamily: 'var(--font-display)', fontSize: '11px', fontWeight: 600,
+                padding: '4px 12px', borderRadius: '4px', cursor: 'pointer',
+                border: '1px solid var(--color-border)',
+                background: showFilters ? 'var(--color-surface)' : 'transparent',
+                color: showFilters ? 'var(--color-text)' : 'var(--color-muted)',
+              }}
+            >
+              {showFilters ? 'Hide Filters' : 'Filters'}
+            </button>
+          )}
+        </div>
+
+        {isMobile && showFilters && (
+          <div style={{
+            background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+            borderRadius: '8px', padding: '16px', marginBottom: '20px',
+          }}>
+            {filterContent}
           </div>
         )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {filtered.map(item =>
+            item.kind === 'event'
+              ? <EventCard key={`e-${item.id}`} item={item} />
+              : item.kind === 'post'
+                ? <PostCard key={`p-${item.id}`} item={item} />
+                : <NewsCard key={`n-${item.id}`} item={item} />
+          )}
+          {!loading && filtered.length === 0 && (
+            <div style={{ color: 'var(--color-muted)', textAlign: 'center', padding: '60px 0', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
+              No items match the current filters
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Sidebar - desktop only */}
+      {!isMobile && (
+        <div style={{ position: 'sticky', top: '80px' }}>
+          {filterContent}
+        </div>
+      )}
     </div>
   )
 }

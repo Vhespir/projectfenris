@@ -1,0 +1,9 @@
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS downvote_count INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS downvotes (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  post_id INTEGER NOT NULL REFERENCES posts(id)  ON DELETE CASCADE,
+  PRIMARY KEY (user_id, post_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_downvotes_post_id ON downvotes(post_id);

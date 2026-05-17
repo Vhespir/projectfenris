@@ -41,12 +41,12 @@ export async function fetchEPA() {
     const readings = res.data
     if (!Array.isArray(readings)) return
 
-    // Only store unhealthy-or-worse readings as events (AQI >= 101)
     const unhealthy = readings.filter(r => r.AQI >= 101)
     let stored = 0
 
     for (const r of unhealthy) {
-      const externalId = `${r.SiteName}-${r.Parameter}-${r.DateObserved}-${r.HourObserved}`
+      // API returns UTC as "YYYY-MM-DDTHH:MM"
+      const externalId = `${r.SiteName}-${r.Parameter}-${r.UTC}`
       const geomJson = JSON.stringify({ type: 'Point', coordinates: [r.Longitude, r.Latitude] })
 
       const { rowCount } = await pool.query(`
@@ -58,12 +58,12 @@ export async function fetchEPA() {
       `, [
         'epa',
         'air_quality',
-        `Air Quality: ${r.ParameterName} AQI ${r.AQI} - ${r.ReportingArea}, ${r.StateCode}`,
+        `Air Quality: ${r.Parameter} AQI ${r.AQI} - ${r.SiteName}`,
         aqi_to_severity(r.AQI),
         geomJson,
         JSON.stringify(r),
         externalId,
-        `${r.DateObserved}T${String(r.HourObserved).padStart(2, '0')}:00:00Z`,
+        r.UTC ? `${r.UTC}:00Z` : null,
       ])
 
       stored += rowCount

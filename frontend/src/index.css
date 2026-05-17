@@ -98,3 +98,71 @@ main {
     transform: translateY(0);
   }
 }
+
+/* ─── Mobile baseline ─────────────────────────────────────────────────────── */
+
+html, body {
+  overflow-x: hidden;
+}
+
+/* Leaflet popups readable on small screens */
+.leaflet-popup-content-wrapper {
+  max-width: 90vw;
+}
+
+/* Tap targets */
+@media (max-width: 768px) {
+  button, a {
+    min-height: 36px;
+  }
+
+  /* Map filter bar scrolls horizontally on mobile */
+  .map-filter-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap !important;
+    scrollbar-width: none;
+  }
+  .map-filter-bar::-webkit-scrollbar { display: none; }
+
+  /* Nav mobile menu slide-down */
+  .nav-mobile-menu {
+    position: absolute;
+    top: 60px;
+    left: 0;
+    right: 0;
+    background: rgba(10,10,10,0.98);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(12px);
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0 16px;
+    z-index: 99;
+  }
+
+  .nav-mobile-link {
+    padding: 12px 24px;
+    font-family: var(--font-display);
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--text-muted);
+    border: none;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+  }
+
+  .nav-mobile-link.active {
+    color: var(--text);
+    background: var(--surface);
+  }
+
+  .nav-mobile-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 8px 24px;
+  }
+}

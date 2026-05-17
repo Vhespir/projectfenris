@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 export default function Footer() {
   return (
     <footer style={{
-      borderTop: '1px solid var(--border)',
+      borderTop: '1px solid var(--color-border)',
       padding: '40px 24px',
     }}>
       <div style={{
@@ -20,15 +20,18 @@ export default function Footer() {
           fontSize: '13px',
           fontWeight: 700,
           letterSpacing: '0.08em',
-          color: 'var(--text-subtle)',
+          color: 'var(--color-subtle)',
         }}>
-          PROJECT <span style={{ color: 'var(--green)' }}>FENRIS</span>
+          PROJECT <span style={{ color: 'var(--color-accent)' }}>FENRIS</span>
         </div>
 
         <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
           {[
-            { href: '/map', label: 'Live Map' },
+            { href: '/feed', label: 'Feed' },
+            { href: '/map', label: 'Map' },
             { href: '/community', label: 'Community' },
+            { href: '/compendium', label: 'Compendium' },
+            { href: '/tools', label: 'Tools' },
             { href: '/about', label: 'About' },
           ].map(link => (
             <Link
@@ -37,7 +40,7 @@ export default function Footer() {
               style={{
                 fontFamily: 'var(--font-display)',
                 fontSize: '12px',
-                color: 'var(--text-subtle)',
+                color: 'var(--color-subtle)',
                 letterSpacing: '0.02em',
               }}
             >
@@ -49,7 +52,7 @@ export default function Footer() {
         <div style={{
           fontFamily: 'var(--font-mono)',
           fontSize: '11px',
-          color: 'var(--text-subtle)',
+          color: 'var(--color-subtle)',
           letterSpacing: '0.04em',
         }}>
           Stay informed. Stay ready.

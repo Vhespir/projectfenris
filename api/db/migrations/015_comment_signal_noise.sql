@@ -1,0 +1,2 @@
+ALTER TABLE comment_votes ADD COLUMN IF NOT EXISTS vote VARCHAR(10) NOT NULL DEFAULT 'signal' CHECK (vote IN ('signal', 'noise'));
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS noise_count INTEGER NOT NULL DEFAULT 0;
