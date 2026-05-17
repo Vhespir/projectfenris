@@ -34,6 +34,9 @@ services:
       EMAIL_FROM: ${EMAIL_FROM}
       BASE_URL: ${BASE_URL}
       AIRNOW_API_KEY: ${AIRNOW_API_KEY}
+      EIA_API_KEY: ${EIA_API_KEY}
+      BLS_API_KEY: ${BLS_API_KEY}
+      FRED_API_KEY: ${FRED_API_KEY}
     volumes:
       - ./api:/app
       - /app/node_modules
