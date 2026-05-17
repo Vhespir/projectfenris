@@ -19,6 +19,7 @@ import { notificationRoutes } from './routes/notifications.js'
 import { searchRoutes } from './routes/search.js'
 import { modRoutes } from './routes/mod.js'
 import { initSocket } from './lib/socket.js'
+import { startEventNotifier } from './lib/eventNotifier.js'
 
 dotenv.config()
 
@@ -344,6 +345,7 @@ try {
   await runMigrations(process.env.DATABASE_URL)
   await app.ready()
   initSocket(app.server, token => app.jwt.verify(token))
+  startEventNotifier()
   await app.listen({ port: process.env.PORT || 3001, host: '0.0.0.0' })
   console.log('Fenris API running')
 } catch (err) {

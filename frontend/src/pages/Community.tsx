@@ -28,19 +28,21 @@ interface Channel {
 }
 
 const CHANNELS: Channel[] = [
-  { id: 'all',      label: 'All Posts',             type: null,                 category: null },
-  { id: 'field',    label: 'Field Reports',          type: 'field_report',       category: null },
-  { id: 'news',     label: 'News Reports',           type: 'self_reported_news', category: null },
-  { id: 'gear',     label: 'Gear and Equipment',     type: 'community',          category: 'Gear and Equipment' },
-  { id: 'food',     label: 'Food and Water',         type: 'community',          category: 'Food and Water' },
-  { id: 'medical',  label: 'Medical',                type: 'community',          category: 'Medical and First Aid' },
-  { id: 'comms',    label: 'Communications',         type: 'community',          category: 'Communications and Ham Radio' },
-  { id: 'security', label: 'Security',               type: 'community',          category: 'Security and Self Defense' },
-  { id: 'evac',     label: 'Bug Out and Evac',       type: 'community',          category: 'Evacuation and Bugging Out' },
-  { id: 'homestead',label: 'Homesteading',           type: 'community',          category: 'Homesteading and Self Sufficiency' },
-  { id: 'skills',   label: 'Skills and Training',    type: 'community',          category: 'Skills and Training' },
-  { id: 'general',  label: 'General Discussion',     type: 'community',          category: 'General Discussion' },
+  { id: 'all',       label: 'All Posts',             type: null,                 category: null },
+  { id: 'field',     label: 'Field Reports',          type: 'field_report',       category: null },
+  { id: 'news',      label: 'News Reports',           type: 'self_reported_news', category: null },
+  { id: 'gear',      label: 'Gear and Equipment',     type: 'community',          category: 'Gear and Equipment' },
+  { id: 'food',      label: 'Food and Water',         type: 'community',          category: 'Food and Water' },
+  { id: 'medical',   label: 'Medical',                type: 'community',          category: 'Medical and First Aid' },
+  { id: 'comms',     label: 'Communications',         type: 'community',          category: 'Communications and Ham Radio' },
+  { id: 'security',  label: 'Security',               type: 'community',          category: 'Security and Self Defense' },
+  { id: 'evac',      label: 'Bug Out and Evac',       type: 'community',          category: 'Evacuation and Bugging Out' },
+  { id: 'homestead', label: 'Homesteading',           type: 'community',          category: 'Homesteading and Self Sufficiency' },
+  { id: 'skills',    label: 'Skills and Training',    type: 'community',          category: 'Skills and Training' },
+  { id: 'general',   label: 'General Discussion',     type: 'community',          category: 'General Discussion' },
 ]
+
+const TOPIC_CHANNEL_IDS = new Set(['gear','food','medical','comms','security','evac','homestead','skills','general'])
 
 const FIELD_REPORT_CATEGORIES = [
   'Weather Event', 'Natural Disaster', 'Infrastructure', 'Civil Unrest',
@@ -189,6 +191,13 @@ export default function Community() {
   const [formError, setFormError] = useState<string | null>(null)
   const [locating, setLocating] = useState(false)
   const [newPostBanner, setNewPostBanner] = useState(false)
+  const [subscribedChannels, setSubscribedChannels] = useState<string[]>([])
+
+  useEffect(() => {
+    const saved = user?.preferences?.channels
+    if (Array.isArray(saved)) setSubscribedChannels(saved as string[])
+    else setSubscribedChannels([])
+  }, [user])
 
   const defaultType = channel.type ?? 'community'
   const defaultCategory = channel.category ?? ''
@@ -211,9 +220,37 @@ export default function Community() {
     setForm(f => ({ ...f, post_type: ch.type ?? 'community', category: ch.category ?? '' }))
   }
 
+  async function toggleSubscription(chId: string) {
+    if (!user) { navigate('/login'); return }
+    const next = subscribedChannels.includes(chId)
+      ? subscribedChannels.filter(c => c !== chId)
+      : [...subscribedChannels, chId]
+    setSubscribedChannels(next)
+    await fetch('/api/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferences: { channels: next } }),
+    })
+  }
+
+  const subscribedKey = subscribedChannels.join(',')
+
   function loadPosts() {
     setLoading(true)
     setNewPostBanner(false)
+    if (channelId === 'subscribed') {
+      if (subscribedChannels.length === 0) {
+        setPosts([])
+        setLoading(false)
+        return
+      }
+      const params = new URLSearchParams({ sort, channels: subscribedChannels.join(',') })
+      fetch(`/api/posts?${params}`)
+        .then(r => r.json())
+        .then(data => { setPosts(Array.isArray(data) ? data : []); setLoading(false) })
+        .catch(() => setLoading(false))
+      return
+    }
     const params = new URLSearchParams({ sort })
     if (channel.type) params.set('type', channel.type)
     if (channel.category) params.set('category', channel.category)
@@ -223,15 +260,16 @@ export default function Community() {
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { loadPosts() }, [channelId, sort])
+  useEffect(() => { loadPosts() }, [channelId, sort, subscribedKey])
 
   useEffect(() => {
     if (!socket) return
-    socket.emit('join_channel', channelId)
+    const roomId = channelId === 'subscribed' ? 'all' : channelId
+    socket.emit('join_channel', roomId)
     const handler = () => setNewPostBanner(true)
     socket.on('new_post', handler)
     return () => {
-      socket.emit('leave_channel', channelId)
+      socket.emit('leave_channel', roomId)
       socket.off('new_post', handler)
     }
   }, [socket, channelId])
@@ -293,30 +331,38 @@ export default function Community() {
   const SYSTEM_CHANNELS = CHANNELS.slice(0, 3)
   const TOPIC_CHANNELS = CHANNELS.slice(3)
 
+  const channelSidebarBtnStyle = (active: boolean) => ({
+    display: 'block' as const, width: '100%', textAlign: 'left' as const,
+    padding: '7px 10px', borderRadius: '5px', cursor: 'pointer', marginBottom: '1px',
+    background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
+    border: 'none' as const,
+    color: active ? 'var(--color-text)' : 'var(--color-muted)',
+    fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: active ? 600 : 400,
+    borderLeft: `2px solid ${active ? 'var(--color-accent)' : 'transparent'}`,
+  })
+
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: isMobile ? '20px 16px' : '32px 24px' }}>
       <div style={{ display: 'flex', gap: '24px', alignItems: 'flex-start' }}>
 
         {/* Sidebar -- desktop */}
         {!isMobile && (
-          <div style={{ width: '190px', flexShrink: 0, position: 'sticky', top: '80px' }}>
+          <div style={{ width: '200px', flexShrink: 0, position: 'sticky', top: '80px' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px', paddingLeft: '10px' }}>
               Community
             </div>
+
+            {user && (
+              <button onClick={() => selectChannel('subscribed')} style={channelSidebarBtnStyle(channelId === 'subscribed')}>
+                {subscribedChannels.length > 0 ? '★' : '☆'} Subscribed
+              </button>
+            )}
 
             {SYSTEM_CHANNELS.map(ch => (
               <button
                 key={ch.id}
                 onClick={() => selectChannel(ch.id)}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '7px 10px', borderRadius: '5px', cursor: 'pointer', marginBottom: '1px',
-                  background: channelId === ch.id ? 'rgba(34,197,94,0.1)' : 'transparent',
-                  border: 'none',
-                  color: channelId === ch.id ? 'var(--color-text)' : 'var(--color-muted)',
-                  fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: channelId === ch.id ? 600 : 400,
-                  borderLeft: `2px solid ${channelId === ch.id ? 'var(--color-accent)' : 'transparent'}`,
-                }}
+                style={channelSidebarBtnStyle(channelId === ch.id)}
               >
                 {ch.id === 'field' ? '! ' : ch.id === 'news' ? '~ ' : '# '}{ch.label}
               </button>
@@ -326,23 +372,33 @@ export default function Community() {
               Topics
             </div>
 
-            {TOPIC_CHANNELS.map(ch => (
-              <button
-                key={ch.id}
-                onClick={() => selectChannel(ch.id)}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left',
-                  padding: '6px 10px', borderRadius: '5px', cursor: 'pointer', marginBottom: '1px',
-                  background: channelId === ch.id ? 'rgba(34,197,94,0.1)' : 'transparent',
-                  border: 'none',
-                  color: channelId === ch.id ? 'var(--color-text)' : 'var(--color-muted)',
-                  fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: channelId === ch.id ? 600 : 400,
-                  borderLeft: `2px solid ${channelId === ch.id ? 'var(--color-accent)' : 'transparent'}`,
-                }}
-              >
-                # {ch.label}
-              </button>
-            ))}
+            {TOPIC_CHANNELS.map(ch => {
+              const isSubbed = subscribedChannels.includes(ch.id)
+              return (
+                <div key={ch.id} style={{ display: 'flex', alignItems: 'center', gap: '2px', marginBottom: '1px' }}>
+                  <button
+                    onClick={() => selectChannel(ch.id)}
+                    style={{ ...channelSidebarBtnStyle(channelId === ch.id), flex: 1, marginBottom: 0 }}
+                  >
+                    # {ch.label}
+                  </button>
+                  {user && (
+                    <button
+                      onClick={e => { e.stopPropagation(); toggleSubscription(ch.id) }}
+                      title={isSubbed ? 'Unsubscribe' : 'Subscribe'}
+                      style={{
+                        background: 'transparent', border: 'none', cursor: 'pointer',
+                        padding: '4px 5px', borderRadius: '4px', lineHeight: 1,
+                        color: isSubbed ? 'var(--color-accent)' : 'var(--color-subtle)',
+                        fontSize: '13px', flexShrink: 0,
+                      }}
+                    >
+                      {isSubbed ? '★' : '☆'}
+                    </button>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -358,6 +414,7 @@ export default function Community() {
                   onChange={e => selectChannel(e.target.value)}
                   style={{ ...inputStyle, width: 'auto', fontSize: '15px', fontWeight: 600, paddingLeft: '8px' }}
                 >
+                  {user && <option value="subscribed">{subscribedChannels.length > 0 ? '★' : '☆'} Subscribed</option>}
                   {SYSTEM_CHANNELS.map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)}
                   <option disabled>-- Topics --</option>
                   {TOPIC_CHANNELS.map(ch => <option key={ch.id} value={ch.id}>{ch.label}</option>)}
@@ -365,7 +422,7 @@ export default function Community() {
               ) : (
                 <div>
                   <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '2px' }}>
-                    {channel.id === 'all' ? '# ' : channel.type === 'field_report' ? '! ' : channel.type === 'self_reported_news' ? '~ ' : '# '}{channel.label}
+                    {channelId === 'subscribed' ? '★ Subscribed' : channel.id === 'all' ? '# ' : channel.type === 'field_report' ? '! ' : channel.type === 'self_reported_news' ? '~ ' : '# '}{channelId !== 'subscribed' && channel.label}
                   </h1>
                   {loading ? null : (
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>
@@ -375,7 +432,7 @@ export default function Community() {
                 </div>
               )}
             </div>
-            <button
+            {channelId !== 'subscribed' && <button
               onClick={() => { if (!user) navigate('/login'); else setShowForm(v => !v) }}
               style={{
                 padding: '8px 16px', borderRadius: '6px', fontFamily: 'var(--font-display)',
@@ -386,7 +443,7 @@ export default function Community() {
               }}
             >
               {showForm ? 'Cancel' : '+ Post'}
-            </button>
+            </button>}
           </div>
 
           {/* Post form */}
@@ -529,6 +586,16 @@ export default function Community() {
             {loading ? (
               <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>
                 Loading...
+              </div>
+            ) : channelId === 'subscribed' && subscribedChannels.length === 0 ? (
+              <div style={{ padding: '60px 0', textAlign: 'center' }}>
+                <div style={{ fontSize: '28px', marginBottom: '12px' }}>☆</div>
+                <div style={{ color: 'var(--color-text)', fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600, marginBottom: '6px' }}>
+                  No subscriptions yet
+                </div>
+                <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                  {isMobile ? 'Switch to a topic channel to subscribe.' : 'Star topics in the sidebar to subscribe.'}
+                </div>
               </div>
             ) : displayed.length === 0 ? (
               <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '60px 0', textAlign: 'center' }}>

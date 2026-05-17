@@ -12,10 +12,24 @@ const CATEGORY_TO_CHANNEL = {
   'General Discussion': 'general',
 }
 
+const CHANNEL_FILTER_MAP = {
+  field:     { type: 'field_report',       category: null },
+  news:      { type: 'self_reported_news', category: null },
+  gear:      { type: 'community', category: 'Gear and Equipment' },
+  food:      { type: 'community', category: 'Food and Water' },
+  medical:   { type: 'community', category: 'Medical and First Aid' },
+  comms:     { type: 'community', category: 'Communications and Ham Radio' },
+  security:  { type: 'community', category: 'Security and Self Defense' },
+  evac:      { type: 'community', category: 'Evacuation and Bugging Out' },
+  homestead: { type: 'community', category: 'Homesteading and Self Sufficiency' },
+  skills:    { type: 'community', category: 'Skills and Training' },
+  general:   { type: 'community', category: 'General Discussion' },
+}
+
 export async function postRoutes(app, { pool }) {
   // List posts
   app.get('/posts', async (req) => {
-    const { type, category, sort = 'recent', limit = 50, offset = 0 } = req.query
+    const { type, category, channels, sort = 'recent', limit = 50, offset = 0 } = req.query
     let query = `
       SELECT p.id, p.post_type, p.category, p.title, p.body,
              p.location_label, p.latitude, p.longitude,
@@ -27,8 +41,21 @@ export async function postRoutes(app, { pool }) {
       WHERE p.is_removed = FALSE
     `
     const params = []
-    if (type) { params.push(type); query += ` AND p.post_type = $${params.length}` }
-    if (category) { params.push(category); query += ` AND p.category = $${params.length}` }
+    if (channels) {
+      const channelList = String(channels).split(',').map(s => s.trim()).filter(s => CHANNEL_FILTER_MAP[s])
+      if (channelList.length > 0) {
+        const conditions = channelList.map(ch => {
+          const f = CHANNEL_FILTER_MAP[ch]
+          return f.category
+            ? `(p.post_type = '${f.type}' AND p.category = '${f.category}')`
+            : `(p.post_type = '${f.type}')`
+        })
+        query += ` AND (${conditions.join(' OR ')})`
+      }
+    } else if (type) {
+      params.push(type); query += ` AND p.post_type = $${params.length}`
+      if (category) { params.push(category); query += ` AND p.category = $${params.length}` }
+    }
     params.push(Math.min(Number(limit), 100))
     params.push(Number(offset))
 

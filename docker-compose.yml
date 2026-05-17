@@ -69,7 +69,7 @@ services:
     container_name: fenris_frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       NODE_ENV: development
     volumes:
@@ -77,17 +77,6 @@ services:
       - ./frontend/public:/app/public
     networks:
       - fenris-network
-
-  nginx:
-    image: nginx:alpine
-    container_name: fenris_nginx
-    restart: unless-stopped
-    network_mode: host
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - frontend
-      - api
 
 volumes:
   postgres-data:

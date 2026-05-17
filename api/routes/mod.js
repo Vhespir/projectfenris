@@ -82,6 +82,42 @@ export async function modRoutes(app, { pool }) {
     return { removed: true }
   })
 
+  // Guides
+  app.get('/mod/guides', { preHandler: [isMod] }, async (req) => {
+    const { status = 'all', limit = 100, offset = 0 } = req.query
+    let where = ''
+    if (status === 'active')  where = 'WHERE g.is_removed = FALSE'
+    if (status === 'removed') where = 'WHERE g.is_removed = TRUE'
+    const { rows } = await pool.query(`
+      SELECT g.id, g.title, g.category, g.region,
+             g.signal_count, g.noise_count, g.is_removed, g.created_at,
+             u.username, u.id AS user_id
+      FROM guides g LEFT JOIN users u ON u.id = g.user_id
+      ${where}
+      ORDER BY g.created_at DESC
+      LIMIT $1 OFFSET $2
+    `, [Math.min(Number(limit), 200), Number(offset)])
+    return rows
+  })
+
+  app.patch('/mod/guides/:id/restore', { preHandler: [isMod] }, async (req, reply) => {
+    const { rowCount } = await pool.query(
+      'UPDATE guides SET is_removed = FALSE WHERE id = $1 AND is_removed = TRUE',
+      [req.params.id]
+    )
+    if (!rowCount) return reply.code(404).send({ error: 'Guide not found or not removed' })
+    return { restored: true }
+  })
+
+  app.delete('/mod/guides/:id', { preHandler: [isMod] }, async (req, reply) => {
+    const { rowCount } = await pool.query(
+      'UPDATE guides SET is_removed = TRUE WHERE id = $1 AND is_removed = FALSE',
+      [req.params.id]
+    )
+    if (!rowCount) return reply.code(404).send({ error: 'Guide not found or already removed' })
+    return { removed: true }
+  })
+
   // Users
   app.get('/mod/users', { preHandler: [isMod] }, async (req) => {
     const { search = '', limit = 100, offset = 0 } = req.query

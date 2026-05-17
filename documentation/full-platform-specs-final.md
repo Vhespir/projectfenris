@@ -115,14 +115,20 @@ Posts with categories, Signal/Noise voting, post types (community, field_report,
 - Post creation (requires auth)
 - Type filtering (All / Field Reports / Community / News Reports)
 - Category filtering per type (contextual pills, only shows when a typed filter is active) [DONE]
-- Signal vote (helpful) and Noise vote (not helpful) with remove support -- "Signal N" / "Noise N" buttons, count hidden when zero
+- Signal vote (helpful) and Noise vote (not helpful) -- toggle-based, mutual exclusion enforced at DB level. "Signal N" / "Noise N" buttons, count hidden when zero.
 - Sort by: Recent, Signal, Proven, Controversial
   - Recent: newest first
   - Signal: net score over time decay
   - Proven: most signal votes all time
   - Controversial: most divided (LEAST/GREATEST ratio * total votes)
 - Field report posts include optional lat/lon (browser geolocation or manual entry) -- feed into wolf head pins on map
-- Comments on posts (threaded, with delete)
+- Comments on posts with Signal/Noise voting per comment [BUILT]
+- Post edit (author only, inline form on post detail page) [BUILT]
+- Comment edit (author only, inline on post detail page) [BUILT]
+- Post delete (author or moderator) [BUILT]
+- Comment delete (author or moderator) [BUILT]
+- Vote persistence on post detail: GET /posts/:id/myvote fetched on mount, restores highlight across page visits [BUILT]
+- Real-time new post banner via Socket.io (join/leave channel, new_post event) [BUILT]
 
 TODO:
 - Regional filtering
@@ -133,10 +139,17 @@ TODO:
 Community guide library.
 - Category sidebar (vertical on desktop, horizontal scrollable pills on mobile)
 - Full text client-side search
-- Guide cards with signal vote count, author, timestamp, trusted contributor badge [DONE]
+- Guide cards with signal vote count, author, timestamp, trusted contributor badge, Founding Member badge [BUILT]
 - Submit guide form (requires auth)
 - 12 categories built in
-- Guide detail page (/compendium/:id) with full body, Signal/Noise vote buttons, signal + noise counts, comment thread, trusted contributor badges [DONE]
+- Guide detail page (/compendium/:id):
+  - Full body, Signal/Noise vote buttons inline in footer (same style as Community post cards) [BUILT]
+  - Guide edit (author only, inline form: title, body, category, region) [BUILT]
+  - Guide delete (author or moderator) [BUILT]
+  - Comment thread with Signal/Noise voting per comment [BUILT]
+  - Comment edit (author only, inline) [BUILT]
+  - Comment delete (author or moderator) [BUILT]
+  - Trusted contributor and Founding Member badges on guide and comments [BUILT]
 - Guides sorted by signal_count DESC
 
 TODO:
@@ -160,8 +173,9 @@ Built:
 - Profile display: bio, avatar, prep level, focus areas, years prepping, living situation, threat focus
 - Showcase section: EDC, bug out bag, vehicle kit, food/water, power, comms, medical, skills/certs
 - Activity tabs: Posts, Field Reports, Guides (count badges on each)
-- Signal Score (displayed as "Signal Score", backed by users.reputation column), tier badge (color-coded by score), Moderator badge
+- Signal Score (displayed as "Signal Score", backed by users.reputation column), tier badge (color-coded by score), Founding Member badge (first 100 users, permanent purple), Moderator badge
 - Avatar: upload (click avatar on profile), remove, default wolf avatar
+- Message button on other users' profiles -- links to /inbox/:username [BUILT]
 - Edit Profile links to /settings
 - Settings: full profile edit form, avatar upload, password change with strength meter, 2FA setup/disable (TOTP)
 - Guides tab shows signal count per guide -- noise count intentionally not shown on profile (UX decision: noise is a content quality signal, not a user shaming metric)
@@ -169,10 +183,25 @@ Built:
 TODO:
 - Privacy controls per field
 
-### 8. About (/about)  [BUILT]
+### 8. Inbox (/inbox, /inbox/:username)  [BUILT]
+Direct messaging between members.
+- Desktop: two-panel layout (260px conversation list + flex thread)
+- Mobile: list-only view OR thread-only view based on route (/inbox vs /inbox/:username)
+- Conversation list: partner avatar, unread badge, last message preview, timestamp
+- Thread: bubble messages (green = mine, surface = theirs), auto-scroll to bottom on open
+- Send on Enter, Shift+Enter for newlines
+- Growing textarea (shrinks back after send)
+- Auto marks thread as read on open via PATCH /messages/:username/read
+- Socket.io: new_message event updates open thread or increments conversation unread count live
+- Unread count badge on inbox icon in navbar (desktop + mobile), green dot badge
+- Navbar inbox icon with badge polls unread count every 60 seconds, updates live via socket
+- Rate limited: 30 messages per minute per user
+- 2000 character limit per message
+
+### 9. About (/about)  [BUILT]
 Platform philosophy, stats bar (data sources, countries, cost, no ads), pillars, spec copy. Linked in footer only (not main nav -- intentional).
 
-### 9. Error Pages  [BUILT]
+### 10. Error Pages  [BUILT]
 Tone: calm, operational, in character.
 Visual: minimal wolf head, faded, single green eye.
 
@@ -186,8 +215,8 @@ Visual: minimal wolf head, faded, single green eye.
 ---
 
 ## Navigation  [BUILT]
-Desktop: Logo | Feed | Map | Community | Compendium | Tools -- right: username + Sign Out (authed) or Sign In + Join (guest)
-Mobile: Logo + hamburger -- dropdown with all links and auth
+Desktop: Logo | Feed | Map | Community | Compendium | Tools -- right: Inbox icon (with unread badge) | Bell icon (notifications) | username + Sign Out (authed) or Sign In + Join (guest)
+Mobile: Logo + hamburger -- dropdown with all links, Inbox link with unread count, auth
 
 ---
 
@@ -212,16 +241,20 @@ TODO:
 - GDACS uses GeoJSON API (not RSS) with 14-day lookback and rolling 7-day expires_at
 
 TODO:
-- Real-time updates via Socket.io
 - Location-aware queries (ST_DWithin once user has location_point)
 
-### Community Layer  [BUILT -- partial]
-- Posts with categories, Signal/Noise voting (add/remove), post types exist
-- Comments on posts (migration 003, API, UI)
+### Community Layer  [BUILT]
+- Posts with categories, Signal/Noise voting (toggle-based, mutual exclusion at DB level via post_votes table), post types exist
+- Comments on posts and guides with Signal/Noise voting [BUILT]
+- Post edit (author only), comment edit (author only), guide edit (author only) [BUILT]
+- Post delete (author or moderator), comment delete (author or moderator), guide delete (author or moderator) [BUILT]
+- Vote persistence: GET /posts/:id/myvote restores highlight on post detail across page visits [BUILT]
 - Field reports feed into map as wolf head pins via lat/lon on posts
 - Sort: Recent, Signal, Proven, Controversial
-- Vote buttons labeled "Signal" / "Noise" throughout (community list and post detail)
-- Tier badge shown next to author username on post cards and comment threads
+- Vote buttons labeled "Signal" / "Noise" throughout (community list, post detail, guide detail, comments)
+- Tier badge and Founding Member badge shown next to author username on post cards and comment threads
+- Real-time new post banner via Socket.io [BUILT]
+- Direct messaging (inbox, conversation list, thread, real-time via socket) [BUILT]
 
 TODO:
 - Regional groups
@@ -230,16 +263,19 @@ TODO:
 - users table with JSONB columns for preferences, focus_areas, showcase
 - Migration 002 ready with all profile fields
 - Profile UI fully built out with posts, field reports, guides tabs
+- Message button on other users' profiles links to /inbox/:username [BUILT]
 
 ### Knowledge Layer (Compendium)  [BUILT]
 - Guides with categories, Signal/Noise binary votes, community submission
-- Guide detail page with Signal/Noise vote buttons (Signal = helpful, Noise = not helpful)
-- Comments on guides (same comments table, guide_id FK)
+- Guide detail page with Signal/Noise vote buttons inline in footer (same style as post cards)
+- Guide edit (author only) and guide delete (author or moderator) [BUILT]
+- Comments on guides with Signal/Noise voting per comment [BUILT]
+- Comment edit (author only) and comment delete (author or moderator) [BUILT]
 - Guide votes stored in guide_votes table (signal/noise, one vote per user per guide, upsert on switch)
 - Signal count displayed in Compendium cards, Dashboard top guides widget, Profile guides tab
 - Noise count displayed on guide detail page only -- intentionally hidden on profile page
 - Reputation effects: guide signal received +2 / removed -2; guide noise received -1 / removed +1
-- Trusted contributor badges on guide cards and guide detail page [DONE]
+- Trusted contributor and Founding Member badges on guide cards and guide detail page [BUILT]
 
 ### Tools Layer  [BUILT -- partial]
 - Water, calories, bug out bag, inventory manager built and working
@@ -265,6 +301,9 @@ Eyewitness reports of active events. Labeled as community reported. Appears in F
 
 ### Guides and Resources  [BUILT]
 Community submitted, rated, surfaced by quality.
+
+### Direct Messages  [BUILT]
+Private one-to-one messaging between members. Threaded conversation view, unread counts, real-time delivery via Socket.io.
 
 ---
 
@@ -316,8 +355,9 @@ Default channels at launch:
 - Poll [TODO]
 
 ### Voting and Sorting  [BUILT]
-- Signal vote (helpful/upvote) and Noise vote (not helpful/downvote), both add/remove [BUILT]
-- Buttons labeled "Signal" / "Noise" on post cards and post detail page
+- Signal vote (helpful/upvote) and Noise vote (not helpful/downvote), toggle-based, mutual exclusion enforced at DB level (post_votes table with composite PK) [BUILT]
+- Buttons labeled "Signal" / "Noise" on post cards, post detail page, guide footer, and comment threads
+- Comment Signal/Noise voting on both post and guide comments [BUILT]
 - Sort by: Recent, Signal, Proven, Controversial [BUILT]
   - Recent: newest first
   - Signal: (signal - noise) / time decay -- favors net-positive posts relative to age
@@ -327,7 +367,7 @@ Default channels at launch:
 
 ---
 
-## Signal Score and Tier System  [BUILT -- partial]
+## Signal Score and Tier System  [BUILT]
 
 ### Vocabulary
 - Signal = upvote. When a user votes content useful they are Signaling it.
@@ -366,7 +406,7 @@ Note: first four rows (post Signal/Noise) and next four (guide Signal/Noise) are
 | 1001-2500 | Operator | #F97316 orange | Active, skilled, operationally engaged |
 | 2500+ | Sentinel | #F59E0B gold | Universal prestige, top tier |
 
-Special: Founding Member -- first 100 users, permanent #A78BFA purple badge regardless of score. [TODO -- flag not yet implemented]
+Special: Founding Member -- first 100 users (users.id <= 100), permanent #A78BFA purple badge regardless of score. [BUILT] Computed at query time via `(id <= 100) AS is_founding_member` -- no separate column. Badge appears on post cards, comment threads, guide cards, guide detail, and profile header.
 
 Tier is derived from users.reputation INTEGER at query time -- no separate tier column. Badge shown next to author username on post cards, comment threads, guide cards, and profile page. Member tier shows no badge.
 
@@ -459,6 +499,7 @@ Hard rules:
 ## User Reputation System  [BUILT -- partial]
 - Signal Score (users.reputation) built and live -- post and guide votes affect it in real time
 - Tier badges displayed next to author names throughout the platform (post cards, comments, guide cards, profile)
+- Founding Member badge (#A78BFA purple) for first 100 users, displayed alongside tier badge everywhere [BUILT]
 - Tier derived from score at query time -- no separate column
 - High signal score members get elevated guide visibility (sorted by signal_count DESC)
 - Capability unlocks and moderation privileges per tier -- TODO
@@ -474,6 +515,7 @@ Tier thresholds, display names, badge colors:
 | 501-1000 | Trusted Contributor | Trusted | #3B82F6 (blue) |
 | 1001-2499 | Operator | Operator | #F97316 (orange) |
 | 2500+ | Sentinel | Sentinel | #F59E0B (gold) |
+| id <= 100 | Founding Member | Founder | #A78BFA (purple) |
 
 Badge renders as a small pill next to the author name wherever authors appear:
 - Post cards in Community feed
@@ -583,7 +625,7 @@ TODO:
 
 ---
 
-## Database Schema  [BUILT -- migrations 001-007 applied]
+## Database Schema  [BUILT -- migrations 001-015 applied]
 
 ```sql
 users
@@ -593,6 +635,7 @@ users
   threat_profile JSONB, preferences JSONB,
   bio, avatar_url, prep_level, focus_areas JSONB,
   years_prepping, living_situation, showcase JSONB,
+  user_lat DOUBLE PRECISION, user_lon DOUBLE PRECISION,
   created_at
 
 news_items
@@ -602,7 +645,13 @@ news_items
 posts
   id, user_id, post_type, category, title, body,
   location_label, latitude, longitude,
-  region, upvote_count, downvote_count, is_removed, created_at
+  region, upvote_count, downvote_count, is_removed, created_at, updated_at
+
+post_votes
+  user_id, post_id, vote VARCHAR(10) CHECK (vote IN ('up', 'down'))
+  PRIMARY KEY (user_id, post_id)
+  -- replaces separate upvotes/downvotes tables (migration 014)
+  -- composite PK enforces mutual exclusion between signal and noise
 
 guides
   id, user_id, title, body, category, region,
@@ -616,29 +665,39 @@ guide_votes
 
 comments
   id, post_id (nullable FK -> posts), guide_id (nullable FK -> guides),
-  user_id, body, is_removed, created_at
+  user_id, body, upvote_count INTEGER DEFAULT 0, noise_count INTEGER DEFAULT 0,
+  is_removed, created_at
+
+comment_votes
+  user_id, comment_id, vote VARCHAR(10) CHECK (vote IN ('signal', 'noise'))
+  PRIMARY KEY (user_id, comment_id)
+  -- mutual exclusion enforced same as post_votes
+
+messages
+  id BIGSERIAL, sender_id, recipient_id,
+  body TEXT CHECK (char_length(body) <= 2000),
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ
+  CONSTRAINT no_self_message CHECK (sender_id <> recipient_id)
+  -- indexes: convo_idx on (LEAST/GREATEST sender/recipient, created_at DESC)
+  --          inbox_idx on (recipient_id, is_read, created_at DESC)
+
+notifications
+  id, user_id, type, message, link, is_read, created_at
 
 disaster_events
   id, source, event_type, title, severity,
   geometry PostGIS, properties JSONB, external_id,
   fetched_at, starts_at, expires_at
-
-upvotes
-  user_id, post_id
-  PRIMARY KEY (user_id, post_id)
-
-downvotes
-  user_id, post_id
-  PRIMARY KEY (user_id, post_id)
 ```
 
 ### Reputation (signal score) effects
 | Action | Delta |
 |---|---|
-| Post upvote received | +1 |
-| Post upvote removed | -1 |
-| Post downvote received | -1 |
-| Post downvote removed | +1 |
+| Post signal received | +1 |
+| Post signal removed | -1 |
+| Post noise received | -1 |
+| Post noise removed | +1 |
 | Guide signal received | +2 |
 | Guide signal removed | -2 |
 | Guide noise received | -1 |
@@ -653,12 +712,12 @@ downvotes
 | Frontend | React + Vite + TypeScript | BUILT |
 | Backend | Node.js + Fastify | BUILT |
 | Database | PostgreSQL + PostGIS | BUILT |
-| Real-time | Socket.io | TODO |
+| Real-time | Socket.io | BUILT (notifications, new posts, direct messages) |
 | Auth | Custom JWT (httpOnly cookie) | BUILT |
 | Hosting | Sentinel VPS via Docker Compose | BUILT |
 | Reverse Proxy | Nginx | BUILT |
 | Map | Leaflet.js + react-leaflet | BUILT |
-| Email | Resend | TODO |
+| Email | Resend | PARTIAL (welcome email built, alert triggers TODO) |
 | Backups | Backblaze B2 | TODO |
 
 ---
@@ -677,12 +736,13 @@ downvotes
 | Text subtle | #3F3F46 | Placeholder, disabled |
 | Accent green | #22C55E | CTAs, live indicators, verified badges |
 | Accent hover | #4ADE80 | Hover states |
-| Danger | #EF4444 | Severe alerts, errors |
+| Danger | #EF4444 | Severe alerts, errors, Noise vote active state |
 | Warning | #F59E0B | Moderate alerts, warnings |
 | Info | #3B82F6 | Informational states |
+| Founding Member | #A78BFA | Founding Member badge (purple) |
 
 ### Where Green Appears
-Live data pulsing indicator, active alerts, verified badges, CTA buttons, key stats, wolf eye in logo. Nowhere else.
+Live data pulsing indicator, active alerts, verified badges, CTA buttons, key stats, wolf eye in logo, Signal vote active state, inbox unread badge. Nowhere else.
 
 ### Typography
 | Role | Font | Usage |
@@ -690,6 +750,9 @@ Live data pulsing indicator, active alerts, verified badges, CTA buttons, key st
 | Display | Space Grotesk | Headings, navigation, labels |
 | Body | Inter | Posts, guides, news, long form |
 | Monospace | Fira Code | Data, coordinates, timestamps |
+
+### Responsive Design
+All pages responsive via `useIsMobile()` hook (threshold: 768px). No CSS media queries in component files -- all breakpoint logic lives in components via inline styles conditioned on `isMobile`. Applies to: Community, Compendium, GuideDetail, Post, Profile, Settings, Map, Tools, Mod, Inbox, Navbar.
 
 ---
 
@@ -785,6 +848,22 @@ Every item shows:
 
 ---
 
+## Real-time Architecture  [BUILT -- partial]
+Socket.io server initialized in `api/lib/socket.js`. Attached to the Fastify HTTP server. JWT verified on connection.
+
+Built and live:
+- `emitToUser(userId, event, data)` -- targets a specific user's socket (notifications, DMs)
+- `emitToChannel(channelId, event, data)` -- broadcasts to all sockets in a channel (new_post)
+- Notification delivery: comment_on_post, comment_on_guide trigger real-time bell updates
+- Direct message delivery: new_message emitted to recipient socket on send
+- New post banner: community page joins/leaves channel, listens for new_post
+
+TODO:
+- Worker emits new events/news on ingest (event alerts to subscribed users)
+- Event-based alert delivery (Extreme/Severe events to users in matching region)
+
+---
+
 ## Email System  [BUILT -- partial]
 Provider: Resend (free tier, 3000 emails/month)
 Package: `resend` installed in api.
@@ -820,6 +899,19 @@ Triggers TODO:
 - Email delivery via Resend
 
 User controls TODO: severity threshold, event types, quiet hours.
+
+---
+
+## Direct Messaging System  [BUILT]
+- messages table (migration 013): sender_id, recipient_id, body, is_read, no_self_message constraint
+- Indexed by conversation pair (LEAST/GREATEST trick) and inbox (recipient, is_read, created_at)
+- GET /messages -- conversation list via CTE (partner, last message, unread count)
+- GET /messages/:username -- thread (200 messages ASC)
+- POST /messages/:username -- send (rate limited 30/min), emits new_message via socket
+- PATCH /messages/:username/read -- marks all messages from partner as read
+- GET /messages/unread-count -- total unread for navbar badge
+- Frontend: /inbox (conversation list) and /inbox/:username (thread view)
+- Unread badge on navbar inbox icon, updates live via socket
 
 ---
 
@@ -883,7 +975,7 @@ Full detail and APIs in data-sources-and-features-reference.md.
 
 ### Lower Priority (polish and scale)
 4. Moderation queue dashboard (mod remove buttons exist on posts/comments -- full mod queue TODO)
-5. Real-time updates via Socket.io
+5. Worker emits new events to connected clients (Socket.io infrastructure already built)
 6. Keyword feed filtering (user-saved keywords matched against news/events)
 
 ### Already built (removed from list)
@@ -891,10 +983,20 @@ Full detail and APIs in data-sources-and-features-reference.md.
 - Onboarding flow (built)
 - Community field reports in Feed stream (built)
 - Self-reported news in Feed stream (built)
-- Downvote + controversial filter (built)
+- Signal/Noise voting + controversial filter (built)
 - Tier/reputation system and badges (built)
+- Founding Member badge -- first 100 users, permanent purple (built)
 - In-app notification bell (built)
 - Feed location awareness -- Near Me toggle, Nominatim geocoding (built)
+- Socket.io real-time infrastructure (built -- notifications, DMs, new post banner)
+- Direct messaging / Inbox (built)
+- Mobile responsive pass (all pages, useIsMobile hook throughout)
+- Post edit and delete (built)
+- Comment edit and delete (built)
+- Guide edit and delete (built)
+- Signal/Noise voting on comments (built)
+- Vote mutual exclusion enforced at DB level (post_votes table)
+- Vote persistence on post detail across page visits (myvote endpoint)
 
 ### Infrastructure
 - SSL on projectfenris.com
@@ -909,20 +1011,24 @@ Full detail and APIs in data-sources-and-features-reference.md.
 - [x] Map showing live events (USGS, GDACS, EPA, radar, weather alerts, air traffic)
 - [x] NASA FIRMS fire layer on map (24h/48h/7d, VIIRS NOAA-20)
 - [x] Community field reports as wolf head pins on map
-- [x] Community posts working end to end (create, upvote, downvote, sort)
-- [x] Comments on posts and guides
-- [x] Compendium with guide detail, Signal/Noise votes, and comments
+- [x] Community posts working end to end (create, vote, sort, edit, delete)
+- [x] Comments on posts and guides with Signal/Noise voting, edit, delete
+- [x] Compendium with guide detail, Signal/Noise votes, guide edit/delete, comment thread
 - [x] Inventory Manager tool (flagship -- 8 sections, templates, suggested build)
 - [x] Auth (register, login, logout, httpOnly cookie JWT)
-- [x] Mobile responsive (all pages)
+- [x] Mobile responsive (all pages, useIsMobile hook)
 - [x] About page
 - [x] Error pages (404, 500, 403, 503)
 - [x] Profile page fully built out (bio, avatar, prep level, showcase, posts/field reports/guides tabs, signal score)
+- [x] Founding Member badge (first 100 users, permanent purple, appears everywhere author info shows)
 - [x] Onboarding flow (region, threat profile, prep level)
-- [x] In-app notification bell (comment notifications, unread badge, mark read)
+- [x] In-app notification bell (comment notifications, unread badge, mark read, real-time via socket)
 - [x] Feed location awareness (Near Me toggle, Haversine filter, Nominatim geocoding on region save)
-- [x] Welcome email via Resend on registration (RESEND_API_KEY + EMAIL_FROM + BASE_URL required in env)
-- [ ] Basic moderation tools
+- [x] Welcome email via Resend on registration
+- [x] Direct messaging / Inbox (conversation list, thread view, real-time, unread badge in navbar)
+- [x] Vote mutual exclusion (Signal/Noise, cannot have both active -- enforced at DB level)
+- [x] Vote persistence on post detail (myvote loaded on mount, survives page refresh)
+- [ ] Basic moderation queue dashboard
 - [ ] Performance acceptable on Sentinel
 - [ ] Used personally for several weeks
 - [ ] Backblaze B2 backups running

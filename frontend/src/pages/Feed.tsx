@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
+import { useSocket } from '../context/SocketContext'
 import { getTier } from '../utils/tier'
 
 interface GeoJSON {
@@ -285,7 +286,9 @@ function FilterBtn({ active, color, children, onClick }: { active: boolean; colo
 export default function FeedPage() {
   const isMobile = useIsMobile()
   const { user } = useAuth()
+  const socket = useSocket()
   const hasLocation = !!(user?.user_lat && user?.user_lon)
+  const [newAlertBanner, setNewAlertBanner] = useState(false)
   const [events, setEvents] = useState<EventItem[]>([])
   const [news, setNews] = useState<NewsItem[]>([])
   const [posts, setPosts] = useState<PostItem[]>([])
@@ -328,6 +331,13 @@ export default function FeedPage() {
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    if (!socket) return
+    const handler = () => setNewAlertBanner(true)
+    socket.on('new_alert', handler)
+    return () => { socket.off('new_alert', handler) }
+  }, [socket])
 
   function toggle<T>(set: Set<T>, val: T): Set<T> {
     const n = new Set(set); n.has(val) ? n.delete(val) : n.add(val); return n
@@ -702,6 +712,34 @@ const combined: FeedItem[] = useMemo(() => [
           }}>
             {filterContent}
           </div>
+        )}
+
+        {newAlertBanner && (
+          <button
+            onClick={() => {
+              setNewAlertBanner(false)
+              setLoading(true)
+              Promise.all([
+                fetch('/api/events?sources=noaa,usgs,gdacs,epa&limit=500').then(r => r.json()),
+                fetch('/api/news?limit=100').then(r => r.json()),
+                fetch('/api/posts?limit=200').then(r => r.json()),
+              ]).then(([evts, nws, psts]) => {
+                setEvents(Array.isArray(evts) ? evts : [])
+                setNews(Array.isArray(nws) ? nws : [])
+                setPosts(Array.isArray(psts) ? psts.filter((p: PostItem) => p.post_type === 'field_report' || p.post_type === 'self_reported_news') : [])
+                setLoading(false)
+              }).catch(() => setLoading(false))
+            }}
+            style={{
+              width: '100%', marginBottom: '10px', padding: '9px 16px',
+              background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+              borderRadius: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)',
+              fontSize: '12px', color: 'var(--color-danger)', textAlign: 'center',
+              letterSpacing: '0.03em',
+            }}
+          >
+            New severe alert -- click to refresh
+          </button>
         )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>

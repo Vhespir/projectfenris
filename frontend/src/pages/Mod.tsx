@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 
-type Tab = 'posts' | 'comments' | 'users'
+type Tab = 'posts' | 'comments' | 'guides' | 'users'
 type Status = 'all' | 'active' | 'removed'
 
 interface ModPost {
@@ -31,6 +31,19 @@ interface ModComment {
   guide_id: number | null
   post_title: string | null
   guide_title: string | null
+}
+
+interface ModGuide {
+  id: number
+  title: string
+  category: string
+  region: string | null
+  signal_count: number
+  noise_count: number
+  is_removed: boolean
+  created_at: string
+  username: string | null
+  user_id: number | null
 }
 
 interface ModUser {
@@ -72,6 +85,7 @@ export default function Mod() {
 
   const [posts, setPosts] = useState<ModPost[]>([])
   const [comments, setComments] = useState<ModComment[]>([])
+  const [guides, setGuides] = useState<ModGuide[]>([])
   const [users, setUsers] = useState<ModUser[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -90,6 +104,10 @@ export default function Mod() {
     } else if (tab === 'comments') {
       fetch(`/api/mod/comments?status=${status}&limit=200`)
         .then(r => r.json()).then(d => { setComments(Array.isArray(d) ? d : []); setLoading(false) })
+        .catch(() => setLoading(false))
+    } else if (tab === 'guides') {
+      fetch(`/api/mod/guides?status=${status}&limit=200`)
+        .then(r => r.json()).then(d => { setGuides(Array.isArray(d) ? d : []); setLoading(false) })
         .catch(() => setLoading(false))
     } else {
       fetch(`/api/mod/users?search=${encodeURIComponent(userSearch)}&limit=200`)
@@ -123,6 +141,16 @@ export default function Mod() {
   async function restoreComment(id: number) {
     await fetch(`/api/mod/comments/${id}/restore`, { method: 'PATCH' })
     setComments(cs => cs.map(c => c.id === id ? { ...c, is_removed: false } : c))
+  }
+
+  async function removeGuide(id: number) {
+    await fetch(`/api/mod/guides/${id}`, { method: 'DELETE' })
+    setGuides(gs => gs.map(g => g.id === id ? { ...g, is_removed: true } : g))
+  }
+
+  async function restoreGuide(id: number) {
+    await fetch(`/api/mod/guides/${id}/restore`, { method: 'PATCH' })
+    setGuides(gs => gs.map(g => g.id === id ? { ...g, is_removed: false } : g))
   }
 
   async function toggleUserFlag(id: number, field: 'is_trusted' | 'is_moderator', current: boolean) {
@@ -202,10 +230,11 @@ export default function Mod() {
       <div style={{ display: 'flex', gap: '4px', marginBottom: '20px' }}>
         <button style={tabBtn('posts')} onClick={() => setTab('posts')}>Posts</button>
         <button style={tabBtn('comments')} onClick={() => setTab('comments')}>Comments</button>
+        <button style={tabBtn('guides')} onClick={() => setTab('guides')}>Guides</button>
         <button style={tabBtn('users')} onClick={() => setTab('users')}>Users</button>
       </div>
 
-      {/* Status filter (posts + comments) */}
+      {/* Status filter (posts, comments, guides) */}
       {tab !== 'users' && (
         <div style={{ display: 'flex', gap: '4px', marginBottom: '16px' }}>
           <button style={statusBtn('all')} onClick={() => setStatus('all')}>All</button>
@@ -357,6 +386,69 @@ export default function Mod() {
                     </tr>
                   )
                 })}
+              </tbody>
+            </table>
+          )}
+
+          {/* Guides table */}
+          {tab === 'guides' && (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={headCell}>Title</th>
+                  <th style={headCell}>Category</th>
+                  <th style={headCell}>Author</th>
+                  <th style={headCell}>Score</th>
+                  <th style={headCell}>Age</th>
+                  <th style={headCell}>Status</th>
+                  <th style={headCell}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {guides.length === 0 ? (
+                  <tr><td colSpan={7} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No guides</td></tr>
+                ) : guides.map(g => (
+                  <tr key={g.id} style={{ opacity: g.is_removed ? 0.5 : 1 }}>
+                    <td style={cellStyle}>
+                      <Link to={`/compendium/${g.id}`} style={{ color: 'var(--color-accent)', textDecoration: 'none', fontWeight: 500 }}>
+                        {g.title.length > 60 ? g.title.slice(0, 60) + '...' : g.title}
+                      </Link>
+                      {g.region && (
+                        <div style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>{g.region}</div>
+                      )}
+                    </td>
+                    <td style={{ ...cellStyle, whiteSpace: 'nowrap', color: 'var(--color-muted)', fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
+                      {g.category}
+                    </td>
+                    <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+                      {g.username ? (
+                        <Link to={`/profile/${g.username}`} style={{ color: 'var(--color-muted)', textDecoration: 'none' }}>
+                          {g.username}
+                        </Link>
+                      ) : <span style={{ color: 'var(--color-subtle)' }}>deleted</span>}
+                    </td>
+                    <td style={{ ...cellStyle, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                      <span style={{ color: 'var(--color-accent)' }}>{g.signal_count}S</span>
+                      {' / '}
+                      <span style={{ color: 'var(--color-danger)' }}>{g.noise_count}N</span>
+                    </td>
+                    <td style={{ ...cellStyle, whiteSpace: 'nowrap', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+                      {timeAgo(g.created_at)}
+                    </td>
+                    <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+                      <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: g.is_removed ? 'var(--color-danger)' : 'var(--color-accent)' }}>
+                        {g.is_removed ? 'removed' : 'active'}
+                      </span>
+                    </td>
+                    <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+                      {g.is_removed ? (
+                        <button style={actionBtn(false)} onClick={() => restoreGuide(g.id)}>Restore</button>
+                      ) : (
+                        <button style={actionBtn(true)} onClick={() => removeGuide(g.id)}>Remove</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )}
