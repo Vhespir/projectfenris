@@ -77,7 +77,7 @@ function timeAgo(iso: string) {
 
 function useCurrentTime() {
   const [t, setT] = useState(() => new Date())
-  useEffect(() => { const id = setInterval(() => setT(new Date()), 60000); return () => clearInterval(id) }, [])
+  useEffect(() => { const id = setInterval(() => setT(new Date()), 1000); return () => clearInterval(id) }, [])
   return t
 }
 
