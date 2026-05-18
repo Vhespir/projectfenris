@@ -478,53 +478,75 @@ function QuickActionsContent({ user }: { user: { username: string } | null }) {
 // ─── Widget: Inventory Status ─────────────────────────────────────────────────
 
 function InventoryContent() {
+  const [kits, setKits] = useState<{ id: string; name: string; type: string }[]>([])
   const [stats, setStats] = useState({ total: 0, out: 0, low: 0, expiringSoon: 0 })
 
   useEffect(() => {
-    const keys = ['bob_72hr', 'bob_winter', 'bob_wildfire', 'food_water', 'medical', 'tools', 'comms', 'power', 'documents', 'shelter']
-    let total = 0, out = 0, low = 0, expiringSoon = 0
-    const today = new Date().toISOString().slice(0, 10)
-    const soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
-    for (const key of keys) {
-      try {
-        const items: { qty: number; par: number; expiry: string }[] = JSON.parse(localStorage.getItem(`fenris_inv_${key}`) ?? '[]')
-        total += items.length
-        for (const i of items) {
-          if (i.qty === 0) out++
-          else if (i.par > 0 && i.qty < i.par) low++
-          if (i.expiry && i.expiry >= today && i.expiry <= soon) expiringSoon++
-        }
-      } catch {}
-    }
-    setStats({ total, out, low, expiringSoon })
+    try {
+      const storedKits: { id: string; name: string; type: string }[] = JSON.parse(localStorage.getItem('fenris_kits') ?? '[]')
+      setKits(storedKits)
+      let total = 0, out = 0, low = 0, expiringSoon = 0
+      const today = new Date().toISOString().slice(0, 10)
+      const soon = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+      for (const kit of storedKits) {
+        try {
+          const items: { qty: number; par: number; expiry?: string | null }[] = JSON.parse(localStorage.getItem(`fenris_kit_items_${kit.id}`) ?? '[]')
+          total += items.length
+          for (const i of items) {
+            const qty = Number(i.qty)
+            const par = Number(i.par)
+            if (qty === 0) out++
+            else if (par > 0 && qty < par) low++
+            if (i.expiry && i.expiry >= today && i.expiry <= soon) expiringSoon++
+          }
+        } catch {}
+      }
+      setStats({ total, out, low, expiringSoon })
+    } catch {}
   }, [])
 
-  if (stats.total === 0) return (
+  if (kits.length === 0) return (
     <div style={{ padding: '24px', textAlign: 'center' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', marginBottom: '12px' }}>No inventory tracked yet.</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', marginBottom: '12px' }}>No kits created yet.</div>
       <Link to="/tools" style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'none' }}>
         Open Inventory Manager
       </Link>
     </div>
   )
 
-  const statItems = [
-    { value: stats.total,        label: 'Items Tracked', color: 'var(--color-text)' },
-    { value: stats.out,          label: 'Out of Stock',  color: '#EF4444' },
-    { value: stats.low,          label: 'Running Low',   color: '#F59E0B' },
-    { value: stats.expiringSoon, label: 'Expiring Soon', color: '#F59E0B' },
-  ].filter(s => s.value > 0 || s.label === 'Items Tracked')
-
   return (
-    <div style={{ padding: '16px', display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
-      {statItems.map(s => (
-        <div key={s.label}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '28px', fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '4px' }}>{s.label}</div>
-        </div>
-      ))}
-      <Link to="/tools" style={{ marginLeft: 'auto', fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'none', padding: '7px 14px', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '6px' }}>
-        Manage
+    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+      <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
+        {[
+          { value: stats.total,        label: 'Items',         color: 'var(--color-text)' },
+          { value: stats.out,          label: 'Out of Stock',  color: '#EF4444' },
+          { value: stats.low,          label: 'Low Stock',     color: '#F59E0B' },
+          { value: stats.expiringSoon, label: 'Expiring Soon', color: '#F59E0B' },
+        ].filter(s => s.label === 'Items' || s.value > 0).map(s => (
+          <div key={s.label}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '24px', fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '4px' }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+        {kits.slice(0, 4).map(kit => {
+          const items: { qty: number; par: number }[] = (() => { try { return JSON.parse(localStorage.getItem(`fenris_kit_items_${kit.id}`) ?? '[]') } catch { return [] } })()
+          const hasIssues = items.some(i => Number(i.qty) === 0 || (Number(i.par) > 0 && Number(i.qty) < Number(i.par)))
+          return (
+            <div key={kit.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', background: 'var(--color-surface)' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: items.length === 0 ? 'var(--color-muted)' : hasIssues ? '#F59E0B' : '#22C55E', flexShrink: 0 }} />
+              <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1 }}>{kit.name}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)' }}>{items.length} items</span>
+            </div>
+          )
+        })}
+      </div>
+      {kits.length > 4 && (
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textAlign: 'center' }}>+{kits.length - 4} more kits</div>
+      )}
+      <Link to="/tools" style={{ fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'none', padding: '7px 14px', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '6px', textAlign: 'center' }}>
+        Manage Inventory
       </Link>
     </div>
   )
@@ -770,62 +792,6 @@ function SpaceWeatherContent() {
           </a>
         )
       })}
-    </div>
-  )
-}
-
-// ─── Widget: Reactor Status ───────────────────────────────────────────────────
-
-interface Reactor { name: string; state: string | null; unit: number | null; power: number; status: string | null }
-
-function ReactorStatusContent() {
-  const [data, setData] = useState<{ reportDate: string | null; total: number; reactors: Reactor[] } | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetch('/api/external/nrc')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { setData(d && !d.error ? d : null); setLoading(false) })
-      .catch(() => setLoading(false))
-  }, [])
-
-  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
-  if (!data) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>NRC data unavailable.</div>
-
-  const atPower = data.reactors.filter(r => r.power >= 100).length
-  const reduced = data.reactors.filter(r => r.power < 100).sort((a, b) => a.power - b.power)
-
-  return (
-    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-      <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-end' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: '#22C55E', lineHeight: 1 }}>{atPower}</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>At 100%</div>
-        </div>
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '32px', fontWeight: 700, color: reduced.length > 0 ? '#F59E0B' : 'var(--color-muted)', lineHeight: 1 }}>{reduced.length}</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '3px' }}>Reduced/Offline</div>
-        </div>
-        <div style={{ marginLeft: 'auto' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)' }}>{data.total} total</div>
-          {data.reportDate && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', marginTop: '2px' }}>{data.reportDate}</div>}
-        </div>
-      </div>
-      {reduced.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
-          {reduced.slice(0, 6).map(r => (
-            <div key={`${r.name}-${r.unit}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 14px', background: 'var(--color-surface)' }}>
-              <div style={{ width: '32px', height: '4px', borderRadius: '2px', background: 'var(--color-bg)', overflow: 'hidden', flexShrink: 0 }}>
-                <div style={{ height: '100%', width: `${r.power}%`, background: r.power === 0 ? '#EF4444' : '#F59E0B', borderRadius: '2px' }} />
-              </div>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: r.power === 0 ? '#EF4444' : '#F59E0B', width: '36px', flexShrink: 0 }}>{r.power}%</span>
-              <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}{r.unit != null ? ` ${r.unit}` : ''}</span>
-              {r.state ? <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{r.state}</span> : null}
-            </div>
-          ))}
-        </div>
-      )}
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>NRC Power Reactor Status Report</div>
     </div>
   )
 }
@@ -1159,7 +1125,6 @@ const WIDGET_DEFS: WidgetDef[] = [
   { id: 'markets',            label: 'Markets',             description: 'Gold, silver, and WTI crude oil spot prices',               defaultWidth: 'half' },
   { id: 'economic_signals',   label: 'Economic Signals',    description: 'Yield curve, CPI, M2 money supply, bank failures',           defaultWidth: 'half' },
   { id: 'space_weather',      label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts',         defaultWidth: 'half' },
-  { id: 'reactor_status',     label: 'Reactor Status',      description: 'NRC nuclear power plant operating status',                   defaultWidth: 'half' },
   { id: 'recalls',            label: 'Active Recalls',      description: 'Recent FDA and USDA food and drug recall alerts',            defaultWidth: 'half' },
   { id: 'crypto',             label: 'Crypto',              description: 'Bitcoin and Ethereum spot prices with 24h change',            defaultWidth: 'half' },
   { id: 'drought',            label: 'Drought Monitor',     description: 'US drought coverage by level from NOAA/USDA/NIDIS',           defaultWidth: 'half' },
@@ -1187,7 +1152,6 @@ function renderWidgetContent(id: string, data: DashData, user: { username: strin
     case 'markets':           return <MarketsContent />
     case 'economic_signals':  return <EconomicSignalsContent />
     case 'space_weather':     return <SpaceWeatherContent />
-    case 'reactor_status':    return <ReactorStatusContent />
     case 'recalls':           return <RecallsContent />
     case 'crypto':            return <CryptoContent />
     case 'drought':           return <DroughtContent />
@@ -1303,6 +1267,7 @@ export default function Dashboard() {
       fetch('/api/users/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ preferences: { dashboard_layout: layout } }),
       }).catch(() => {})
     }, 2000)
