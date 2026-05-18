@@ -21,6 +21,7 @@ import { modRoutes } from './routes/mod.js'
 import { externalRoutes } from './routes/external.js'
 import { aarRoutes } from './routes/aar.js'
 import { frequencyRoutes } from './routes/frequencies.js'
+import { inventoryRoutes } from './routes/inventory.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
 
@@ -360,6 +361,7 @@ await app.register(modRoutes, { pool })
 await app.register(externalRoutes)
 await app.register(aarRoutes, { pool })
 await app.register(frequencyRoutes, { pool })
+await app.register(inventoryRoutes, { pool })
 
 try {
   await runMigrations(process.env.DATABASE_URL)
