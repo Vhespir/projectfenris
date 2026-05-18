@@ -27,7 +27,7 @@ interface Post {
   location_label: string | null; latitude: number | null; longitude: number | null
 }
 interface DashData { events: DisasterEvent[]; news: NewsItem[]; posts: Post[]; loading: boolean }
-interface LayoutItem { id: string; width: 'full' | 'half' }
+interface LayoutItem { id: string; width: 'full' | 'half'; config?: Record<string, unknown> }
 
 // ─── Layout persistence ───────────────────────────────────────────────────────
 
@@ -102,6 +102,7 @@ function GeolocateUser() {
 function Widget({
   title, link, linkLabel, editMode, dragListeners, dragAttributes,
   onToggleWidth, onRemove, width, children,
+  noReorder, onMoveUp, onMoveDown, onConfigure,
 }: {
   title: string; link?: string; linkLabel?: string
   editMode: boolean
@@ -110,6 +111,10 @@ function Widget({
   onToggleWidth: () => void; onRemove: () => void
   width: 'full' | 'half'
   children: React.ReactNode
+  noReorder?: boolean
+  onMoveUp?: () => void
+  onMoveDown?: () => void
+  onConfigure?: () => void
 }) {
   const eBtnStyle: React.CSSProperties = {
     background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '3px',
@@ -120,18 +125,30 @@ function Widget({
     <div style={{ border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden', outline: editMode ? '1px dashed rgba(255,255,255,0.06)' : 'none' }}>
       <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)' }}>
         {editMode && (
-          <span
-            {...dragAttributes}
-            {...dragListeners}
-            style={{ color: 'var(--color-subtle)', cursor: 'grab', fontSize: '14px', lineHeight: 1, flexShrink: 0, touchAction: 'none', userSelect: 'none' }}
-            title="Drag to reorder"
-          >
-            ⠿
-          </span>
+          noReorder ? (
+            <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
+              <button onClick={onMoveUp} disabled={!onMoveUp} title="Move up"
+                style={{ ...eBtnStyle, opacity: onMoveUp ? 1 : 0.3, cursor: onMoveUp ? 'pointer' : 'default', padding: '1px 5px' }}>↑</button>
+              <button onClick={onMoveDown} disabled={!onMoveDown} title="Move down"
+                style={{ ...eBtnStyle, opacity: onMoveDown ? 1 : 0.3, cursor: onMoveDown ? 'pointer' : 'default', padding: '1px 5px' }}>↓</button>
+            </div>
+          ) : (
+            <span
+              {...dragAttributes}
+              {...dragListeners}
+              style={{ color: 'var(--color-subtle)', cursor: 'grab', fontSize: '16px', lineHeight: 1, flexShrink: 0, touchAction: 'none', userSelect: 'none', padding: '0 2px' }}
+              title="Drag to reorder"
+            >
+              ⠿
+            </span>
+          )
         )}
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', flex: 1 }}>{title}</span>
         {editMode ? (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+            {onConfigure && (
+              <button onClick={onConfigure} style={eBtnStyle} title="Configure widget">⚙</button>
+            )}
             <button onClick={onToggleWidth} style={eBtnStyle} title={width === 'full' ? 'Make half width' : 'Make full width'}>
               {width === 'full' ? '½' : '■'}
             </button>
@@ -326,13 +343,51 @@ function EventCountsContent({ data }: { data: DashData }) {
 
 // ─── Widget: Latest News ──────────────────────────────────────────────────────
 
-function NewsContent({ data }: { data: DashData }) {
-  if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
-  if (!data.news.length) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>No news items yet.</div>
+const NEWS_CATS: [string, string][] = [
+  ['all',            'All'],
+  ['emergency',      'Emergency'],
+  ['health',         'Health'],
+  ['cybersecurity',  'Cyber'],
+  ['recall',         'Recalls'],
+  ['travel',         'Travel'],
+  ['nuclear',        'Nuclear'],
+  ['hurricane',      'Hurricane'],
+  ['environment',    'Environment'],
+  ['science',        'Science'],
+]
+
+function NewsContent({ data, config, onSetConfig }: {
+  data: DashData
+  config?: Record<string, unknown>
+  onSetConfig?: (u: Record<string, unknown>) => void
+}) {
+  const category = (config?.category as string | undefined) || 'all'
+  const configOpen = config?._open === true
+  const [filteredNews, setFilteredNews] = useState<NewsItem[] | null>(null)
+  const [filterLoading, setFilterLoading] = useState(false)
+
+  useEffect(() => {
+    if (category === 'all') { setFilteredNews(null); return }
+    setFilterLoading(true)
+    fetch(`/api/news?category=${category}&limit=10`)
+      .then(r => r.json())
+      .then(d => { setFilteredNews(Array.isArray(d) ? d : []); setFilterLoading(false) })
+      .catch(() => { setFilteredNews([]); setFilterLoading(false) })
+  }, [category])
+
+  const displayNews = filteredNews ?? data.news
+  const isLoading = category === 'all' ? data.loading : filterLoading
+
+  if (isLoading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!displayNews.length) return (
+    <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>
+      No news items{category !== 'all' ? ` for "${category}"` : ''}.
+    </div>
+  )
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
-      {data.news.slice(0, 8).map(item => (
+      {displayNews.slice(0, 8).map(item => (
         <a key={item.id} href={item.url ?? '#'} target="_blank" rel="noopener noreferrer"
           style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '11px 14px' }}
           onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
@@ -340,11 +395,34 @@ function NewsContent({ data }: { data: DashData }) {
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.source}</span>
+            {category === 'all' && (
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{item.category}</span>
+            )}
             {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
           </div>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.4 }}>{item.title}</div>
         </a>
       ))}
+      {configOpen && onSetConfig && (
+        <div style={{ padding: '12px 14px', background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Filter by Category</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {NEWS_CATS.map(([val, lbl]) => {
+              const active = val === 'all' ? category === 'all' : category === val
+              return (
+                <button key={val}
+                  onClick={() => onSetConfig({ category: val === 'all' ? undefined : val, _open: true })}
+                  style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
+                    border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                    background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
+                    color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+                  {lbl}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -610,17 +688,18 @@ function TopGuidesContent() {
   )
 }
 
-// ─── Widget: Markets (Gold / Silver / WTI Oil) ────────────────────────────────
+// ─── Widget: Markets (Metals / Oil / Indices) ─────────────────────────────────
 
 interface MetalsData { gold: { price: number; change_pct: number }; silver: { price: number; change_pct: number } }
 interface OilData { price: number; change_pct: number | null; period: string; unit: string }
+interface StockItem { label: string; price: number; change_pct: number | null }
 
 function PriceRow({ label, price, changePct, fmt }: { label: string; price: number; changePct: number | null; fmt: (n: number) => string }) {
   const color = changePct == null ? 'var(--color-muted)' : changePct >= 0 ? '#22C55E' : '#EF4444'
   const sign  = changePct != null && changePct >= 0 ? '+' : ''
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '52px', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '56px', flexShrink: 0 }}>{label}</span>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>{fmt(price)}</span>
       {changePct != null && (
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color, fontWeight: 600 }}>{sign}{changePct.toFixed(2)}%</span>
@@ -629,37 +708,79 @@ function PriceRow({ label, price, changePct, fmt }: { label: string; price: numb
   )
 }
 
-function MarketsContent() {
+function MarketsContent({ config, onSetConfig }: { config?: Record<string, unknown>; onSetConfig?: (u: Record<string, unknown>) => void }) {
   const [metals, setMetals] = useState<MetalsData | null>(null)
   const [oil, setOil] = useState<OilData | null>(null)
+  const [stocks, setStocks] = useState<StockItem[] | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const showGold   = config?.showGold   !== false
+  const showSilver = config?.showSilver !== false
+  const showOil    = config?.showOil    !== false
+  const showSP500  = config?.showSP500  !== false
+  const showDow    = config?.showDow    !== false
+  const showNasdaq = config?.showNasdaq !== false
+  const configOpen = config?._open      === true
 
   useEffect(() => {
     Promise.all([
       fetch('/api/external/metals').then(r => r.ok ? r.json() : null).catch(() => null),
       fetch('/api/external/oil').then(r => r.ok ? r.json() : null).catch(() => null),
-    ]).then(([m, o]) => {
+      fetch('/api/external/stocks').then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([m, o, s]) => {
       setMetals(m && !m.error ? m : null)
       setOil(o && !o.error ? o : null)
+      setStocks(Array.isArray(s) ? s : null)
       setLoading(false)
     })
   }, [])
 
   if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
-  if (!metals && !oil) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+  if (!metals && !oil && !stocks) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
 
   const goldPrice   = metals?.gold?.price   != null ? Number(metals.gold.price)   : null
   const silverPrice = metals?.silver?.price != null ? Number(metals.silver.price) : null
   const oilPrice    = oil?.price            != null ? Number(oil.price)            : null
 
+  const stockMap: Record<string, StockItem> = {}
+  for (const s of stocks ?? []) stockMap[s.label] = s
+
+  const instruments: [string, string, boolean][] = [
+    ['Gold',    'showGold',   showGold],
+    ['Silver',  'showSilver', showSilver],
+    ['WTI Oil', 'showOil',    showOil],
+    ['S&P 500', 'showSP500',  showSP500],
+    ['Dow',     'showDow',    showDow],
+    ['NASDAQ',  'showNasdaq', showNasdaq],
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {goldPrice   != null && <PriceRow label="Gold"   price={goldPrice}   changePct={metals!.gold.change_pct   ?? null} fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
-      {silverPrice != null && <PriceRow label="Silver" price={silverPrice} changePct={metals!.silver.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} />}
-      {oilPrice    != null && <PriceRow label="WTI"    price={oilPrice}    changePct={oil!.change_pct           ?? null} fmt={n => `$${n.toFixed(2)}`} />}
+      {showGold   && goldPrice   != null && <PriceRow label="Gold"    price={goldPrice}   changePct={metals!.gold.change_pct   ?? null} fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
+      {showSilver && silverPrice != null && <PriceRow label="Silver"  price={silverPrice} changePct={metals!.silver.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} />}
+      {showOil    && oilPrice    != null && <PriceRow label="WTI"     price={oilPrice}    changePct={oil!.change_pct           ?? null} fmt={n => `$${n.toFixed(2)}`} />}
+      {showSP500  && stockMap['S&P 500']  && <PriceRow label="S&P 500" price={stockMap['S&P 500'].price}  changePct={stockMap['S&P 500'].change_pct}  fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />}
+      {showDow    && stockMap['Dow']       && <PriceRow label="Dow"     price={stockMap['Dow'].price}       changePct={stockMap['Dow'].change_pct}       fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} />}
+      {showNasdaq && stockMap['NASDAQ']    && <PriceRow label="NASDAQ"  price={stockMap['NASDAQ'].price}    changePct={stockMap['NASDAQ'].change_pct}    fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />}
       <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
-        Gold/Silver: GoldPrice.org{oil?.period ? ` · WTI: ${oil.period} · EIA` : ''}
+        Gold/Silver: GoldPrice.org{oil?.period ? ` · WTI: EIA` : ''}{stocks?.length ? ' · Indices: Yahoo Finance' : ''}
       </div>
+      {configOpen && onSetConfig && (
+        <div style={{ padding: '12px 16px', borderTop: '1px solid var(--color-border)', background: 'rgba(0,0,0,0.15)' }}>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '10px' }}>Toggle Instruments</div>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {instruments.map(([label, key, active]) => (
+              <button key={key} onClick={() => onSetConfig({ [key]: !active })}
+                style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
+                  border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                  background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
+                  color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -966,15 +1087,29 @@ function NearEarthContent() {
         <div style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textAlign: 'right' }}>{data.date_range}</div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
-        {data.closest.slice(0, 4).map((o, i) => (
-          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 12px', background: 'var(--color-surface)' }}>
-            {o.hazardous && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#EF4444', flexShrink: 0 }}>PHA</span>}
-            <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', flexShrink: 0 }}>{o.miss_distance_lunar.toFixed(1)} LD</span>
-          </div>
-        ))}
+        {data.closest.slice(0, 4).map((o, i) => {
+          const jplUrl = `https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(o.name.replace(/[()]/g, '').trim())}`
+          return (
+            <a key={i} href={jplUrl} target="_blank" rel="noopener noreferrer"
+              style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 12px', background: 'var(--color-surface)', textDecoration: 'none' }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
+            >
+              {o.hazardous && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: '#EF4444', flexShrink: 0 }}>PHA</span>}
+              <span style={{ fontSize: '12px', color: o.hazardous ? '#F59E0B' : 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{o.name}</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', flexShrink: 0 }}>{o.miss_distance_lunar.toFixed(1)} LD</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', flexShrink: 0 }}>{o.date}</span>
+            </a>
+          )
+        })}
       </div>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>NASA Center for Near Earth Object Studies · LD = lunar distances</div>
+      <a href="https://cneos.jpl.nasa.gov/ca/" target="_blank" rel="noopener noreferrer"
+        style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textDecoration: 'none' }}
+        onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-accent)')}
+        onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-subtle)')}
+      >
+        NASA CNEOS · LD = lunar distances
+      </a>
     </div>
   )
 }
@@ -1109,20 +1244,21 @@ interface WidgetDef {
   id: string; label: string; description: string
   defaultWidth: 'full' | 'half'
   link?: string; linkLabel?: string
+  configurable?: boolean
 }
 
 const WIDGET_DEFS: WidgetDef[] = [
   { id: 'alerts',        label: 'Active Alerts',   description: 'Severe and Extreme events from all sources',        defaultWidth: 'full',  link: '/feed',      linkLabel: 'View feed' },
   { id: 'map',           label: 'Live Map',         description: 'Interactive map with live event markers',           defaultWidth: 'full',  link: '/map',       linkLabel: 'Full map' },
   { id: 'event_counts',  label: 'Event Summary',    description: 'Active event counts by severity, source, and type', defaultWidth: 'half',  link: '/feed',      linkLabel: 'View feed' },
-  { id: 'news',          label: 'Latest News',      description: 'Verified news from curated sources',               defaultWidth: 'half',  link: '/feed',      linkLabel: 'View all' },
+  { id: 'news',          label: 'Latest News',      description: 'Verified news from curated sources',               defaultWidth: 'half',  link: '/feed',      linkLabel: 'View all', configurable: true },
   { id: 'community',     label: 'Community',        description: 'Latest community posts and discussions',            defaultWidth: 'half',  link: '/community', linkLabel: 'View all' },
   { id: 'field_reports', label: 'Field Reports',    description: 'Ground-level reports from members',                 defaultWidth: 'half',  link: '/community', linkLabel: 'View all' },
   { id: 'quick_actions', label: 'Quick Actions',    description: 'Navigation links and auth actions',                 defaultWidth: 'half' },
   { id: 'inventory',     label: 'Inventory Status', description: 'Summary of your prep inventory',                   defaultWidth: 'half',  link: '/tools',     linkLabel: 'Manage' },
   { id: 'top_guides',    label: 'Top Guides',       description: 'Highest rated guides from the compendium',          defaultWidth: 'half',  link: '/compendium', linkLabel: 'View all' },
   { id: 'radar_widget',       label: 'Radar',               description: 'Live weather radar overlay',                                defaultWidth: 'half',  link: '/map',        linkLabel: 'Full map' },
-  { id: 'markets',            label: 'Markets',             description: 'Gold, silver, and WTI crude oil spot prices',               defaultWidth: 'half' },
+  { id: 'markets',            label: 'Markets',             description: 'Gold, silver, oil, and stock index prices',                defaultWidth: 'half', configurable: true },
   { id: 'economic_signals',   label: 'Economic Signals',    description: 'Yield curve, CPI, M2 money supply, bank failures',           defaultWidth: 'half' },
   { id: 'space_weather',      label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts',         defaultWidth: 'half' },
   { id: 'recalls',            label: 'Active Recalls',      description: 'Recent FDA and USDA food and drug recall alerts',            defaultWidth: 'half' },
@@ -1137,19 +1273,25 @@ const WIDGET_DEFS: WidgetDef[] = [
 
 // ─── Widget content dispatcher ───────────────────────────────────────────────
 
-function renderWidgetContent(id: string, data: DashData, user: { username: string } | null) {
+function renderWidgetContent(
+  id: string,
+  data: DashData,
+  user: { username: string } | null,
+  config?: Record<string, unknown>,
+  onSetConfig?: (update: Record<string, unknown>) => void,
+) {
   switch (id) {
     case 'alerts':        return <AlertsContent data={data} />
     case 'map':           return <MapContent data={data} />
     case 'event_counts':  return <EventCountsContent data={data} />
-    case 'news':          return <NewsContent data={data} />
+    case 'news':          return <NewsContent data={data} config={config} onSetConfig={onSetConfig} />
     case 'community':     return <CommunityContent data={data} />
     case 'field_reports': return <FieldReportsContent data={data} />
     case 'quick_actions': return <QuickActionsContent user={user} />
     case 'inventory':         return <InventoryContent />
     case 'top_guides':        return <TopGuidesContent />
     case 'radar_widget':      return <RadarWidgetContent />
-    case 'markets':           return <MarketsContent />
+    case 'markets':           return <MarketsContent config={config} onSetConfig={onSetConfig} />
     case 'economic_signals':  return <EconomicSignalsContent />
     case 'space_weather':     return <SpaceWeatherContent />
     case 'recalls':           return <RecallsContent />
@@ -1167,19 +1309,18 @@ function renderWidgetContent(id: string, data: DashData, user: { username: strin
 // ─── Sortable Widget ──────────────────────────────────────────────────────────
 
 function SortableWidget({
-  item, def, editMode, isMobile, data, user, onToggleWidth, onRemove,
+  item, def, editMode, isMobile, data, user, onToggleWidth, onRemove, onSetConfig,
 }: {
   item: LayoutItem; def: WidgetDef; editMode: boolean; isMobile: boolean
   data: DashData; user: { username: string } | null
   onToggleWidth: () => void; onRemove: () => void
+  onSetConfig: (update: Record<string, unknown>) => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
-  // The dragged element stays as an invisible placeholder; DragOverlay renders
-  // the visible clone above all stacking contexts (including Leaflet panes).
-  // Non-dragged elements animate via transform EXCEPT the map widget -- Leaflet
-  // breaks when its container is moved by a CSS transform.
-  const isMap = item.id === 'map'
-  const applyTransform = !isDragging && !isMap
+  const applyTransform = !isDragging
+  const onConfigure = def.configurable
+    ? () => onSetConfig({ _open: !(item.config?._open) })
+    : undefined
   return (
     <div
       ref={setNodeRef}
@@ -1188,12 +1329,6 @@ function SortableWidget({
         transform: applyTransform ? CSS.Transform.toString(transform) : undefined,
         transition: applyTransform ? transition : undefined,
         opacity: isDragging ? 0 : 1,
-        // Map widget needs position+zIndex so it paints above animated sort widgets.
-        // Animated widgets get z-index:0 from their CSS transform stacking context;
-        // the map at z-index:2 stays on top. DragOverlay uses z-index:999 internally
-        // so the drag ghost still renders above everything.
-        position: isMap ? 'relative' : undefined,
-        zIndex: isMap ? 2 : undefined,
       }}
     >
       <Widget
@@ -1205,9 +1340,10 @@ function SortableWidget({
         dragAttributes={attributes as Record<string, unknown>}
         onToggleWidth={onToggleWidth}
         onRemove={onRemove}
+        onConfigure={onConfigure}
         width={item.width}
       >
-        {renderWidgetContent(item.id, data, user)}
+        {renderWidgetContent(item.id, data, user, item.config, onSetConfig)}
       </Widget>
     </div>
   )
@@ -1313,6 +1449,21 @@ export default function Dashboard() {
   function resetLayout() {
     setLayout(DEFAULT_LAYOUT)
   }
+  function setWidgetConfig(id: string, update: Record<string, unknown>) {
+    setLayout(prev => prev.map(item =>
+      item.id === id ? { ...item, config: { ...item.config, ...update } } : item
+    ))
+  }
+  function moveWidget(id: string, dir: -1 | 1) {
+    setLayout(prev => {
+      const idx = prev.findIndex(l => l.id === id)
+      const next = idx + dir
+      if (next < 0 || next >= prev.length) return prev
+      const arr = [...prev]
+      ;[arr[idx], arr[next]] = [arr[next], arr[idx]]
+      return arr
+    })
+  }
 
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -1394,8 +1545,11 @@ export default function Dashboard() {
                         onToggleWidth={() => toggleWidth(idx)}
                         onRemove={() => removeWidget(item.id)}
                         width={item.width}
+                        noReorder
+                        onMoveUp={editMode && idx > 0 ? () => moveWidget(item.id, -1) : undefined}
+                        onMoveDown={editMode && idx < layout.length - 1 ? () => moveWidget(item.id, 1) : undefined}
                       >
-                        {renderWidgetContent(item.id, data, user)}
+                        {renderWidgetContent(item.id, data, user, item.config, (u) => setWidgetConfig(item.id, u))}
                       </Widget>
                     </div>
                   )
@@ -1412,6 +1566,7 @@ export default function Dashboard() {
                     user={user}
                     onToggleWidth={() => toggleWidth(idx)}
                     onRemove={() => removeWidget(item.id)}
+                    onSetConfig={(u) => setWidgetConfig(item.id, u)}
                   />
                 )
               })}

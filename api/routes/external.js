@@ -328,4 +328,43 @@ export async function externalRoutes(app) {
       reply.code(503).send({ error: 'NEO unavailable', detail: err.message })
     }
   })
+
+  // ── Stock market indices (Yahoo Finance) ──────────────────────────────────────
+  app.get('/external/stocks', async (_req, reply) => {
+    try {
+      const data = await withCache('stocks', 5 * 60_000, async () => {
+        const targets = [
+          { sym: '%5EGSPC', label: 'S&P 500' },
+          { sym: '%5EDJI',  label: 'Dow' },
+          { sym: '%5EIXIC', label: 'NASDAQ' },
+        ]
+        const results = []
+        for (const t of targets) {
+          try {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${t.sym}?interval=1d&range=2d`
+            const res = await fetch(url, {
+              headers: { ...H, 'Accept': 'application/json' },
+              signal: AbortSignal.timeout(8_000),
+            })
+            if (!res.ok) continue
+            const json = await res.json()
+            const meta = json.chart?.result?.[0]?.meta
+            if (!meta) continue
+            const prev = meta.chartPreviousClose ?? meta.previousClose
+            const curr = meta.regularMarketPrice
+            results.push({
+              label: t.label,
+              price: curr,
+              change_pct: prev && curr ? ((curr - prev) / prev) * 100 : null,
+            })
+          } catch {}
+        }
+        if (!results.length) throw new Error('no data from Yahoo Finance')
+        return results
+      })
+      return data
+    } catch (err) {
+      reply.code(503).send({ error: 'stocks unavailable', detail: err.message })
+    }
+  })
 }
