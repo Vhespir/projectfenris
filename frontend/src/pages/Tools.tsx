@@ -610,9 +610,6 @@ function InventoryManager() {
   const cats = Array.from(new Set(items.map(i => i.category))).sort()
   const displayed = filterCat ? items.filter(i => i.category === filterCat) : items
   const sortedItems = [...displayed].sort((a, b) => {
-    const so = { out: 0, low: 1, ok: 2 }
-    const d = so[invStatus(a.qty, a.par)] - so[invStatus(b.qty, b.par)]
-    if (d !== 0) return d
     const cd = a.category.localeCompare(b.category)
     if (cd !== 0) return cd
     return a.name.localeCompare(b.name)
@@ -738,7 +735,8 @@ function InventoryManager() {
                 {meta.short} only
               </label>
             </div>
-            <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ borderRadius: '4px', overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+            <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
               {catalogResults.length === 0 && (
                 <div style={{ padding: '20px', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', background: 'var(--color-surface)' }}>No items match</div>
               )}
@@ -762,6 +760,7 @@ function InventoryManager() {
                   </div>
                 )
               })}
+            </div>
             </div>
             <div style={{ marginTop: '10px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)' }}>
               {catalogResults.length} items &nbsp;·&nbsp; click to add &nbsp;·&nbsp; {addedInCatalog.size > 0 ? `${addedInCatalog.size} added this session` : ''}
