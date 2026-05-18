@@ -58,14 +58,18 @@ export async function checkPendingAlerts(pool) {
     let users
     try {
       const { rows } = await pool.query(`
-        SELECT u.id, u.username, u.email, u.notification_prefs
+        SELECT u.id, u.username, u.email, u.notification_prefs,
+          ST_Distance(
+            ST_SetSRID(ST_MakePoint(u.user_lon, u.user_lat), 4326)::geography,
+            ST_Centroid($1::geometry)::geography
+          ) AS centroid_dist_m
         FROM users u
         WHERE u.user_lat IS NOT NULL
           AND u.user_lon IS NOT NULL
           AND (u.notification_prefs->>'email')::boolean = true
           AND ST_DWithin(
             ST_SetSRID(ST_MakePoint(u.user_lon, u.user_lat), 4326)::geography,
-            $1::geography,
+            ST_Centroid($1::geometry)::geography,
             500000
           )
           AND NOT EXISTS (
@@ -81,6 +85,8 @@ export async function checkPendingAlerts(pool) {
 
     for (const user of users) {
       const prefs = user.notification_prefs ?? {}
+      const radiusM = (prefs.radius_km ?? 150) * 1000
+      if (user.centroid_dist_m > radiusM) continue
       if (!severityMeetsThreshold(event.severity, prefs.severity ?? 'severe')) continue
       if (!categoryAllowed(event.event_type, prefs.categories)) continue
 

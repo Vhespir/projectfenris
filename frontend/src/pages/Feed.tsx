@@ -265,6 +265,10 @@ function PostCard({ item }: { item: PostItem }) {
   )
 }
 
+function readFilters(): Record<string, unknown> {
+  try { return JSON.parse(localStorage.getItem('feed_filters') ?? '{}') } catch { return {} }
+}
+
 const SOURCE_FILTERS = ['noaa', 'usgs', 'gdacs', 'epa'] as const
 const SEVERITY_LEVELS = ['Extreme', 'Severe', 'Moderate', 'Minor'] as const
 
@@ -313,13 +317,13 @@ export default function FeedPage() {
   const [posts, setPosts] = useState<PostItem[]>([])
   const [loading, setLoading] = useState(true)
   const [showFilters, setShowFilters] = useState(false)
-  const [nearMe, setNearMe] = useState(true)
-  const [nearMeKm, setNearMeKm] = useState(500)
+  const [nearMe, setNearMe] = useState<boolean>(() => (readFilters().nearMe as boolean) ?? true)
+  const [nearMeKm, setNearMeKm] = useState<number>(() => (readFilters().nearMeKm as number) ?? 500)
 
-  const [showEvents, setShowEvents] = useState(true)
-  const [showNews, setShowNews] = useState(true)
-  const [showFieldReports, setShowFieldReports] = useState(true)
-  const [showCommunityReports, setShowCommunityReports] = useState(true)
+  const [showEvents, setShowEvents] = useState<boolean>(() => (readFilters().showEvents as boolean) ?? true)
+  const [showNews, setShowNews] = useState<boolean>(() => (readFilters().showNews as boolean) ?? true)
+  const [showFieldReports, setShowFieldReports] = useState<boolean>(() => (readFilters().showFieldReports as boolean) ?? true)
+  const [showCommunityReports, setShowCommunityReports] = useState<boolean>(() => (readFilters().showCommunityReports as boolean) ?? true)
   const [activeSources, setActiveSources] = useState<Set<string>>(new Set())
   const [activeSeverities, setActiveSeverities] = useState<Set<string>>(new Set())
   const [activeEventTypes, setActiveEventTypes] = useState<Set<string>>(new Set())
@@ -327,10 +331,11 @@ export default function FeedPage() {
   const [activeNewsSources, setActiveNewsSources] = useState<Set<string>>(new Set())
   const [keywordFilterOn, setKeywordFilterOn] = useState(false)
   const [kwInput, setKwInput] = useState('')
-  const [sortBy, setSortBy] = useState<'newest' | 'severity'>('newest')
+  const [sortBy, setSortBy] = useState<'newest' | 'severity'>(() => (readFilters().sortBy as 'newest' | 'severity') ?? 'newest')
   const [eventTypesExpanded, setEventTypesExpanded] = useState(false)
   const [newsSourcesExpanded, setNewsSourcesExpanded] = useState(false)
   const [displayCount, setDisplayCount] = useState(30)
+  const [searchText, setSearchText] = useState('')
   const sentinelRef = useRef<HTMLDivElement>(null)
   const initKeywords = ((user?.preferences as Record<string, unknown> | undefined)?.feed as { keywords?: string[] } | undefined)?.keywords ?? []
   const [savedKeywords, setSavedKeywords] = useState<string[]>(initKeywords)
@@ -362,6 +367,14 @@ export default function FeedPage() {
     socket.on('new_alert', handler)
     return () => { socket.off('new_alert', handler) }
   }, [socket])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('feed_filters', JSON.stringify({
+        nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports,
+      }))
+    } catch {}
+  }, [nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports])
 
   function toggle<T>(set: Set<T>, val: T): Set<T> {
     const n = new Set(set); n.has(val) ? n.delete(val) : n.add(val); return n
@@ -428,6 +441,14 @@ export default function FeedPage() {
         const lower = text.toLowerCase()
         if (!savedKeywords.some(kw => lower.includes(kw))) return false
       }
+      if (searchText.trim()) {
+        const q = searchText.trim().toLowerCase()
+        let text = ''
+        if (item.kind === 'event') text = `${item.title} ${item.event_type} ${(item.properties as Record<string, string>).areaDesc ?? ''}`
+        else if (item.kind === 'news') text = `${item.title} ${item.summary ?? ''} ${item.source} ${item.category ?? ''}`
+        else text = `${item.title} ${item.body} ${item.location_label ?? ''}`
+        if (!text.toLowerCase().includes(q)) return false
+      }
       return true
     })
 
@@ -441,7 +462,7 @@ export default function FeedPage() {
       })
     }
     return base
-  }, [combined, showEvents, showNews, showFieldReports, showCommunityReports, activeSources, activeSeverities, activeEventTypes, activeNewsCategories, activeNewsSources, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords, sortBy])
+  }, [combined, showEvents, showNews, showFieldReports, showCommunityReports, activeSources, activeSeverities, activeEventTypes, activeNewsCategories, activeNewsSources, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords, sortBy, searchText])
 
   const severeCounts = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
 
@@ -450,9 +471,9 @@ export default function FeedPage() {
      [...activeSources].sort().join(), [...activeSeverities].sort().join(),
      [...activeEventTypes].sort().join(), [...activeNewsSources].sort().join(),
      [...activeNewsCategories].sort().join(), nearMe, nearMeKm, keywordFilterOn,
-     savedKeywords.join()
+     savedKeywords.join(), searchText,
     ].join('|'),
-    [showEvents, showNews, showFieldReports, showCommunityReports, sortBy, activeSources, activeSeverities, activeEventTypes, activeNewsSources, activeNewsCategories, nearMe, nearMeKm, keywordFilterOn, savedKeywords]
+    [showEvents, showNews, showFieldReports, showCommunityReports, sortBy, activeSources, activeSeverities, activeEventTypes, activeNewsSources, activeNewsCategories, nearMe, nearMeKm, keywordFilterOn, savedKeywords, searchText]
   )
 
   useEffect(() => { setDisplayCount(30) }, [filterSignature])
@@ -507,6 +528,7 @@ export default function FeedPage() {
     setActiveNewsSources(new Set())
     setKeywordFilterOn(false)
     setSortBy('newest')
+    setSearchText('')
   }
 
   const locationLabel = [user?.region_county, user?.region_state].filter(Boolean).join(', ')
@@ -884,6 +906,36 @@ export default function FeedPage() {
             New severe alert -- click to refresh
           </button>
         )}
+
+        <div style={{ position: 'relative', marginBottom: '12px' }}>
+          <input
+            type="text"
+            value={searchText}
+            onChange={e => setSearchText(e.target.value)}
+            placeholder="Search feed..."
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '9px 36px 9px 14px', borderRadius: '6px',
+              background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+              color: 'var(--color-text)', fontSize: '13px', fontFamily: 'var(--font-body)',
+              outline: 'none',
+            }}
+            onFocus={e => (e.target.style.borderColor = 'var(--color-accent)')}
+            onBlur={e => (e.target.style.borderColor = 'var(--color-border)')}
+          />
+          {searchText && (
+            <button
+              onClick={() => setSearchText('')}
+              style={{
+                position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-muted)',
+                fontSize: '16px', lineHeight: 1, padding: '0 2px',
+              }}
+            >
+              &times;
+            </button>
+          )}
+        </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {filtered.slice(0, displayCount).map(item =>

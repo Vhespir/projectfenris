@@ -85,6 +85,7 @@ export default function Settings() {
     email: true,
     severity: 'severe',
     categories: ALL_CATEGORY_IDS,
+    radius_km: 150,
   })
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -130,6 +131,7 @@ export default function Settings() {
             email:      data.notification_prefs.email      ?? true,
             severity:   data.notification_prefs.severity   ?? 'severe',
             categories: data.notification_prefs.categories ?? ALL_CATEGORY_IDS,
+            radius_km:  data.notification_prefs.radius_km  ?? 150,
           })
         }
       })
@@ -582,6 +584,29 @@ export default function Settings() {
                     </button>
                   )
                 })}
+              </div>
+
+              {/* Alert radius */}
+              <label style={{ ...labelStyle, marginTop: '20px' }}>Alert Radius</label>
+              <p style={{ fontSize: '12px', color: 'var(--color-muted)', marginBottom: '10px' }}>Only receive alerts for events within this distance of your saved location.</p>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {([100, 150, 250, 500] as const).map(r => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setNotifPrefs(p => ({ ...p, radius_km: r }))}
+                    style={{
+                      flex: 1, padding: '8px 4px', borderRadius: '6px', cursor: 'pointer',
+                      fontFamily: 'var(--font-mono)', fontSize: '12px',
+                      background: notifPrefs.radius_km === r ? 'rgba(34,197,94,0.08)' : 'var(--color-bg)',
+                      border: `1px solid ${notifPrefs.radius_km === r ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                      color: notifPrefs.radius_km === r ? 'var(--color-accent)' : 'var(--color-muted)',
+                      fontWeight: notifPrefs.radius_km === r ? 700 : 400,
+                    }}
+                  >
+                    {r}km
+                  </button>
+                ))}
               </div>
             </>
           )}
