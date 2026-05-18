@@ -341,21 +341,25 @@ export async function externalRoutes(app) {
         const results = []
         for (const t of targets) {
           try {
-            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${t.sym}?interval=1d&range=2d`
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${t.sym}?interval=1d&range=1mo`
             const res = await fetch(url, {
               headers: { ...H, 'Accept': 'application/json' },
               signal: AbortSignal.timeout(8_000),
             })
             if (!res.ok) continue
             const json = await res.json()
-            const meta = json.chart?.result?.[0]?.meta
+            const result = json.chart?.result?.[0]
+            const meta = result?.meta
             if (!meta) continue
             const prev = meta.chartPreviousClose ?? meta.previousClose
             const curr = meta.regularMarketPrice
+            const closes = (result?.indicators?.quote?.[0]?.close ?? [])
+              .filter(v => v != null && typeof v === 'number')
             results.push({
               label: t.label,
               price: curr,
               change_pct: prev && curr ? ((curr - prev) / prev) * 100 : null,
+              sparkline: closes.slice(-15),
             })
           } catch {}
         }

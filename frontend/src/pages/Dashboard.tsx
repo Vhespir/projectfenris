@@ -378,10 +378,36 @@ function NewsContent({ data, config, onSetConfig }: {
   const displayNews = filteredNews ?? data.news
   const isLoading = category === 'all' ? data.loading : filterLoading
 
+  const configPanel = configOpen && onSetConfig ? (
+    <div style={{ padding: '12px 14px', background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Filter by Category</div>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        {NEWS_CATS.map(([val, lbl]) => {
+          const active = val === 'all' ? category === 'all' : category === val
+          return (
+            <button key={val}
+              onClick={() => onSetConfig({ category: val === 'all' ? undefined : val, _open: true })}
+              style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
+                border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
+                color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+              {lbl}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  ) : null
+
   if (isLoading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+
   if (!displayNews.length) return (
-    <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>
-      No news items{category !== 'all' ? ` for "${category}"` : ''}.
+    <div>
+      <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>
+        No news items{category !== 'all' ? ` in "${category}"` : ''}.
+        {category !== 'all' && <div style={{ marginTop: '6px', fontSize: '11px' }}>Try a different category below.</div>}
+      </div>
+      {configPanel}
     </div>
   )
 
@@ -403,26 +429,7 @@ function NewsContent({ data, config, onSetConfig }: {
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.4 }}>{item.title}</div>
         </a>
       ))}
-      {configOpen && onSetConfig && (
-        <div style={{ padding: '12px 14px', background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Filter by Category</div>
-          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-            {NEWS_CATS.map(([val, lbl]) => {
-              const active = val === 'all' ? category === 'all' : category === val
-              return (
-                <button key={val}
-                  onClick={() => onSetConfig({ category: val === 'all' ? undefined : val, _open: true })}
-                  style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
-                    border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                    background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
-                    color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
-                  {lbl}
-                </button>
-              )
-            })}
-          </div>
-        </div>
-      )}
+      {configPanel}
     </div>
   )
 }
@@ -692,18 +699,47 @@ function TopGuidesContent() {
 
 interface MetalsData { gold: { price: number; change_pct: number }; silver: { price: number; change_pct: number } }
 interface OilData { price: number; change_pct: number | null; period: string; unit: string }
-interface StockItem { label: string; price: number; change_pct: number | null }
+interface StockItem { label: string; price: number; change_pct: number | null; sparkline?: number[] }
 
-function PriceRow({ label, price, changePct, fmt }: { label: string; price: number; changePct: number | null; fmt: (n: number) => string }) {
+function Sparkline({ data, positive }: { data: number[]; positive: boolean }) {
+  if (data.length < 2) return null
+  const W = 64, H = 28
+  const min = Math.min(...data), max = Math.max(...data)
+  const range = max - min || 1
+  const pts = data.map((v, i) =>
+    `${(i / (data.length - 1)) * W},${H - ((v - min) / range) * (H - 2) - 1}`
+  ).join(' ')
+  const color = positive ? '#22C55E' : '#EF4444'
+  return (
+    <svg width={W} height={H} style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.8} />
+    </svg>
+  )
+}
+
+function PriceRow({ label, price, changePct, fmt, sparkline }: {
+  label: string; price: number; changePct: number | null; fmt: (n: number) => string
+  sparkline?: number[]
+}) {
   const color = changePct == null ? 'var(--color-muted)' : changePct >= 0 ? '#22C55E' : '#EF4444'
   const sign  = changePct != null && changePct >= 0 ? '+' : ''
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)' }}>
       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '56px', flexShrink: 0 }}>{label}</span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>{fmt(price)}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '17px', fontWeight: 700, color: 'var(--color-text)', flex: 1 }}>{fmt(price)}</span>
+      {sparkline && sparkline.length >= 2 && <Sparkline data={sparkline} positive={(changePct ?? 0) >= 0} />}
       {changePct != null && (
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color, fontWeight: 600 }}>{sign}{changePct.toFixed(2)}%</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color, fontWeight: 600 }}>{sign}{changePct.toFixed(2)}%</span>
       )}
+    </div>
+  )
+}
+
+function UnavailableRow({ label }: { label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderBottom: '1px solid var(--color-border)', opacity: 0.4 }}>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', width: '56px', flexShrink: 0 }}>{label}</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>unavailable</span>
     </div>
   )
 }
@@ -756,12 +792,12 @@ function MarketsContent({ config, onSetConfig }: { config?: Record<string, unkno
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {showGold   && goldPrice   != null && <PriceRow label="Gold"    price={goldPrice}   changePct={metals!.gold.change_pct   ?? null} fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} />}
-      {showSilver && silverPrice != null && <PriceRow label="Silver"  price={silverPrice} changePct={metals!.silver.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} />}
-      {showOil    && oilPrice    != null && <PriceRow label="WTI"     price={oilPrice}    changePct={oil!.change_pct           ?? null} fmt={n => `$${n.toFixed(2)}`} />}
-      {showSP500  && stockMap['S&P 500']  && <PriceRow label="S&P 500" price={stockMap['S&P 500'].price}  changePct={stockMap['S&P 500'].change_pct}  fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />}
-      {showDow    && stockMap['Dow']       && <PriceRow label="Dow"     price={stockMap['Dow'].price}       changePct={stockMap['Dow'].change_pct}       fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} />}
-      {showNasdaq && stockMap['NASDAQ']    && <PriceRow label="NASDAQ"  price={stockMap['NASDAQ'].price}    changePct={stockMap['NASDAQ'].change_pct}    fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} />}
+      {showGold   && (goldPrice   != null ? <PriceRow label="Gold"    price={goldPrice}   changePct={metals!.gold.change_pct   ?? null} fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} /> : <UnavailableRow label="Gold" />)}
+      {showSilver && (silverPrice != null ? <PriceRow label="Silver"  price={silverPrice} changePct={metals!.silver.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} /> : <UnavailableRow label="Silver" />)}
+      {showOil    && (oilPrice    != null ? <PriceRow label="WTI"     price={oilPrice}    changePct={oil!.change_pct           ?? null} fmt={n => `$${n.toFixed(2)}`} /> : <UnavailableRow label="WTI" />)}
+      {showSP500  && (stockMap['S&P 500'] ? <PriceRow label="S&P 500" price={stockMap['S&P 500'].price}  changePct={stockMap['S&P 500'].change_pct}  fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} sparkline={stockMap['S&P 500'].sparkline} /> : <UnavailableRow label="S&P 500" />)}
+      {showDow    && (stockMap['Dow']     ? <PriceRow label="Dow"     price={stockMap['Dow'].price}       changePct={stockMap['Dow'].change_pct}       fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} sparkline={stockMap['Dow'].sparkline} />     : <UnavailableRow label="Dow" />)}
+      {showNasdaq && (stockMap['NASDAQ']  ? <PriceRow label="NASDAQ"  price={stockMap['NASDAQ'].price}    changePct={stockMap['NASDAQ'].change_pct}    fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} sparkline={stockMap['NASDAQ'].sparkline} />  : <UnavailableRow label="NASDAQ" />)}
       <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
         Gold/Silver: GoldPrice.org{oil?.period ? ` · WTI: EIA` : ''}{stocks?.length ? ' · Indices: Yahoo Finance' : ''}
       </div>
@@ -1534,7 +1570,7 @@ export default function Dashboard() {
                 if (MAP_WIDGETS.has(item.id)) {
                   return (
                     <div
-                      key={item.id}
+                      key={`${item.id}-${idx}`}
                       style={{ gridColumn: item.width === 'full' || isMobile ? '1 / -1' : 'span 1', position: 'relative', zIndex: 1 }}
                     >
                       <Widget
