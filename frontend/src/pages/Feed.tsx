@@ -319,6 +319,7 @@ export default function FeedPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [nearMe, setNearMe] = useState<boolean>(() => (readFilters().nearMe as boolean) ?? true)
   const [nearMeKm, setNearMeKm] = useState<number>(() => (readFilters().nearMeKm as number) ?? 500)
+  const [timePeriod, setTimePeriod] = useState<number>(() => (readFilters().timePeriod as number) ?? 7)
 
   const [showEvents, setShowEvents] = useState<boolean>(() => (readFilters().showEvents as boolean) ?? true)
   const [showNews, setShowNews] = useState<boolean>(() => (readFilters().showNews as boolean) ?? true)
@@ -346,10 +347,11 @@ export default function FeedPage() {
   }, [user?.id])
 
   useEffect(() => {
+    setLoading(true)
     Promise.all([
-      fetch('/api/events?sources=noaa,usgs,gdacs,epa&limit=500').then(r => r.json()),
-      fetch('/api/news?limit=200').then(r => r.json()),
-      fetch('/api/posts?limit=200').then(r => r.json()),
+      fetch(`/api/events?sources=noaa,usgs,gdacs,epa&days=${timePeriod}`).then(r => r.json()),
+      fetch(`/api/news?days=${timePeriod}&limit=2000`).then(r => r.json()),
+      fetch(`/api/posts?limit=500`).then(r => r.json()),
     ]).then(([evts, nws, psts]) => {
       setEvents(Array.isArray(evts) ? evts : [])
       setNews(Array.isArray(nws) ? nws : [])
@@ -359,7 +361,7 @@ export default function FeedPage() {
       setPosts(community)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [])
+  }, [timePeriod])
 
   useEffect(() => {
     if (!socket) return
@@ -371,10 +373,10 @@ export default function FeedPage() {
   useEffect(() => {
     try {
       localStorage.setItem('feed_filters', JSON.stringify({
-        nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports,
+        nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports, timePeriod,
       }))
     } catch {}
-  }, [nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports])
+  }, [nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports, timePeriod])
 
   function toggle<T>(set: Set<T>, val: T): Set<T> {
     const n = new Set(set); n.has(val) ? n.delete(val) : n.add(val); return n
@@ -529,6 +531,7 @@ export default function FeedPage() {
     setKeywordFilterOn(false)
     setSortBy('newest')
     setSearchText('')
+    setTimePeriod(7)
   }
 
   const locationLabel = [user?.region_county, user?.region_state].filter(Boolean).join(', ')
@@ -540,6 +543,25 @@ export default function FeedPage() {
     <>
       <div style={{ fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 600, color: 'var(--color-muted)', letterSpacing: '0.04em', marginBottom: '12px' }}>
         Filters
+      </div>
+
+      <SidebarLabel>Time Period</SidebarLabel>
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '4px' }}>
+        {([1, 3, 7, 30] as const).map(d => (
+          <button
+            key={d}
+            onClick={() => setTimePeriod(d)}
+            style={{
+              flex: 1, padding: '5px 0', borderRadius: '4px', cursor: 'pointer', fontSize: '10px',
+              fontFamily: 'var(--font-mono)', fontWeight: timePeriod === d ? 700 : 400,
+              background: timePeriod === d ? 'var(--color-accent)' : 'transparent',
+              color: timePeriod === d ? '#0A0A0A' : 'var(--color-subtle)',
+              border: `1px solid ${timePeriod === d ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            }}
+          >
+            {d === 1 ? 'Today' : `${d}d`}
+          </button>
+        ))}
       </div>
 
       <SidebarLabel>Content</SidebarLabel>
@@ -813,7 +835,7 @@ export default function FeedPage() {
             </span>
           )}
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>
-            {loading ? '...' : `${Math.min(displayCount, filtered.length)} of ${filtered.length}`}
+            {loading ? '...' : `${Math.min(displayCount, filtered.length)} of ${filtered.length} · ${timePeriod === 1 ? 'today' : `${timePeriod}d`}`}
           </span>
           <div style={{ display: 'flex', gap: '4px' }}>
             <button
@@ -885,9 +907,9 @@ export default function FeedPage() {
               setNewAlertBanner(false)
               setLoading(true)
               Promise.all([
-                fetch('/api/events?sources=noaa,usgs,gdacs,epa&limit=500').then(r => r.json()),
-                fetch('/api/news?limit=200').then(r => r.json()),
-                fetch('/api/posts?limit=200').then(r => r.json()),
+                fetch(`/api/events?sources=noaa,usgs,gdacs,epa&days=${timePeriod}`).then(r => r.json()),
+                fetch(`/api/news?days=${timePeriod}&limit=2000`).then(r => r.json()),
+                fetch(`/api/posts?limit=500`).then(r => r.json()),
               ]).then(([evts, nws, psts]) => {
                 setEvents(Array.isArray(evts) ? evts : [])
                 setNews(Array.isArray(nws) ? nws : [])

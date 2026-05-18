@@ -117,7 +117,7 @@ app.get('/proxy/opensky', async (req, reply) => {
 })
 
 app.get('/events', async (req) => {
-  const { source, sources, severity, limit = 500 } = req.query
+  const { source, sources, severity, limit = 2000, days } = req.query
   let query = `
     SELECT id, source, event_type, title, severity,
            ST_AsGeoJSON(geometry)::json AS geometry,
@@ -133,14 +133,18 @@ app.get('/events', async (req) => {
     if (list.length > 0) { params.push(list); query += ` AND source = ANY($${params.length}::text[])` }
   }
   if (severity) { params.push(severity); query += ` AND severity = $${params.length}` }
-  params.push(Math.min(Number(limit), 2000))
+  if (days) {
+    const d = Math.min(Math.max(Number(days), 1), 90)
+    query += ` AND fetched_at > NOW() - INTERVAL '${d} days'`
+  }
+  params.push(Math.min(Number(limit), 5000))
   query += ` ORDER BY fetched_at DESC LIMIT $${params.length}`
   const { rows } = await pool.query(query, params)
   return rows
 })
 
 app.get('/news', async (req) => {
-  const { limit = 50, category, source } = req.query
+  const { limit = 50, category, source, days } = req.query
   let query = `SELECT id, source, title, url, summary, category, region, published_at FROM news_items WHERE 1=1`
   const params = []
   if (category) {
@@ -149,7 +153,11 @@ app.get('/news', async (req) => {
     else if (cats.length > 1) { params.push(cats); query += ` AND category = ANY($${params.length}::text[])` }
   }
   if (source) { params.push(String(source).trim()); query += ` AND source = $${params.length}` }
-  params.push(Math.min(Number(limit), 200))
+  if (days) {
+    const d = Math.min(Math.max(Number(days), 1), 90)
+    query += ` AND published_at > NOW() - INTERVAL '${d} days'`
+  }
+  params.push(Math.min(Number(limit), 2000))
   query += ` ORDER BY published_at DESC NULLS LAST LIMIT $${params.length}`
   const { rows } = await pool.query(query, params)
   return rows
