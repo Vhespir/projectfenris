@@ -51,14 +51,33 @@ export default function Footer() {
           ))}
         </div>
 
-        <div style={{
-          fontFamily: 'var(--font-mono)',
-          fontSize: '11px',
-          color: 'var(--color-subtle)',
-          letterSpacing: '0.04em',
-        }}>
-          Stay informed. Stay ready.
-        </div>
+        <a
+          href="https://ko-fi.com/projectfenris"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '7px 14px',
+            borderRadius: '6px',
+            background: '#22C55E',
+            color: '#0A0A0A',
+            fontFamily: 'var(--font-display)',
+            fontSize: '12px',
+            fontWeight: 600,
+            textDecoration: 'none',
+            letterSpacing: '0.02em',
+            flexShrink: 0,
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.background = '#4ADE80' }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.background = '#22C55E' }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M2 7h18.5a2.5 2.5 0 0 1 0 5H18v2a6 6 0 0 1-6 6H6a4 4 0 0 1-4-4V7zm16 5h2.5a.5.5 0 0 0 0-1H18v1z" />
+          </svg>
+          Support Us
+        </a>
       </div>
     </footer>
   )

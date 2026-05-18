@@ -422,7 +422,7 @@ function InventoryManager() {
           const res = await fetch(`/api/inventory/kits/${activeKitId}/items`, { credentials: 'include' })
           if (res.ok) {
             const data = await res.json()
-            const mapped = data.map((i: any) => ({ ...i, id: String(i.id), kit_id: String(i.kit_id) }))
+            const mapped = data.map((i: any) => ({ ...i, id: String(i.id), kit_id: String(i.kit_id), qty: Number(i.qty), par: Number(i.par) }))
             setKitItemsMap(prev => ({ ...prev, [activeKitId!]: mapped }))
             saveLocalItems(activeKitId!, mapped)
             return
@@ -500,7 +500,7 @@ function InventoryManager() {
         })
         if (res.ok) {
           const real = await res.json()
-          const realItem: KitItem = { ...newItem, id: String(real.id) }
+          const realItem: KitItem = { ...newItem, id: String(real.id), qty: Number(real.qty), par: Number(real.par) }
           setKitItemsMap(prev => ({
             ...prev,
             [activeKitId]: (prev[activeKitId] ?? []).map(i => i.id === tempId ? realItem : i),
@@ -567,7 +567,7 @@ function InventoryManager() {
   function adjustQty(itemId: string, delta: number) {
     const item = items.find(i => i.id === itemId)
     if (!item) return
-    updateItem(itemId, { qty: Math.max(0, item.qty + delta) })
+    updateItem(itemId, { qty: Math.max(0, Number(item.qty) + delta) })
   }
 
   function openExpand(item: KitItem) {
@@ -840,9 +840,9 @@ function InventoryManager() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }} onClick={e => e.stopPropagation()}>
                       <button onClick={() => adjustQty(item.id, -1)} style={{ width: '22px', height: '22px', borderRadius: '3px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)', cursor: 'pointer', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}>-</button>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 700, color, minWidth: '28px', textAlign: 'center' }}>{item.qty}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 700, color, minWidth: '28px', textAlign: 'center' }}>{Number(item.qty)}</span>
                       <button onClick={() => adjustQty(item.id, 1)} style={{ width: '22px', height: '22px', borderRadius: '3px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)', cursor: 'pointer', fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: '1' }}>+</button>
-                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: '2px' }}>/ {item.par} {item.unit}</span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: '2px' }}>/ {Number(item.par)} {item.unit}</span>
                     </div>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color, background: `${color}18`, border: `1px solid ${color}33`, borderRadius: '3px', padding: '1px 5px', flexShrink: 0 }}>{status.toUpperCase()}</span>
                     <button onClick={e => { e.stopPropagation(); removeItem(item.id) }} style={{ background: 'transparent', border: 'none', color: 'var(--color-subtle)', cursor: 'pointer', fontSize: '16px', lineHeight: '1', padding: '0 2px', flexShrink: 0 }}>x</button>
