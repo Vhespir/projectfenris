@@ -5,15 +5,6 @@ import 'leaflet/dist/leaflet.css'
 import { EventLayer, RadarLayer, WeatherAlertLayer, type DisasterEvent } from '../components/MapEventLayer'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
-import {
-  DndContext, DragOverlay, closestCenter, PointerSensor, KeyboardSensor,
-  useSensor, useSensors, type DragEndEvent, type DragStartEvent,
-} from '@dnd-kit/core'
-import {
-  arrayMove, SortableContext, sortableKeyboardCoordinates,
-  useSortable, rectSortingStrategy,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,29 +18,34 @@ interface Post {
   location_label: string | null; latitude: number | null; longitude: number | null
 }
 interface DashData { events: DisasterEvent[]; news: NewsItem[]; posts: Post[]; loading: boolean }
-interface LayoutItem { id: string; width: 'full' | 'half'; config?: Record<string, unknown> }
 
-// ─── Layout persistence ───────────────────────────────────────────────────────
+type ColMode = 1 | 2 | 3 | 'focus'
 
-const LS_LAYOUT = 'fenris_dashboard_layout'
-
-const DEFAULT_LAYOUT: LayoutItem[] = [
-  { id: 'alerts',        width: 'full' },
-  { id: 'map',           width: 'full' },
-  { id: 'event_counts',  width: 'half' },
-  { id: 'news',          width: 'half' },
-  { id: 'community',     width: 'half' },
-  { id: 'field_reports', width: 'half' },
-  { id: 'quick_actions', width: 'half' },
-  { id: 'inventory',     width: 'half' },
-]
-
-function loadLayout(): LayoutItem[] {
-  try { const s = localStorage.getItem(LS_LAYOUT); if (s) return JSON.parse(s) } catch {}
-  return DEFAULT_LAYOUT
+interface SlotEntry {
+  type: string
+  config: Record<string, unknown>
 }
 
-const MAP_WIDGETS = new Set(['map', 'radar_widget'])
+interface DashboardPrefs {
+  columns: ColMode
+  rows: number
+  slots: Record<string, SlotEntry | null>
+}
+
+// ─── Default layout ───────────────────────────────────────────────────────────
+
+const DEFAULT_PREFS: DashboardPrefs = {
+  columns: 2,
+  rows: 3,
+  slots: {
+    '0': { type: 'alerts',        config: {} },
+    '1': { type: 'map',           config: {} },
+    '2': { type: 'news',          config: {} },
+    '3': { type: 'event_counts',  config: {} },
+    '4': { type: 'community',     config: {} },
+    '5': { type: 'field_reports', config: {} },
+  },
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -97,24 +93,14 @@ function GeolocateUser() {
   return null
 }
 
-// ─── Widget wrapper ───────────────────────────────────────────────────────────
+// ─── Panel wrapper ────────────────────────────────────────────────────────────
 
-function Widget({
-  title, link, linkLabel, editMode, dragListeners, dragAttributes,
-  onToggleWidth, onRemove, width, children,
-  noReorder, onMoveUp, onMoveDown, onConfigure,
+function Panel({
+  title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure,
 }: {
   title: string; link?: string; linkLabel?: string
-  editMode: boolean
-  dragListeners?: Record<string, unknown>
-  dragAttributes?: Record<string, unknown>
-  onToggleWidth: () => void; onRemove: () => void
-  width: 'full' | 'half'
-  children: React.ReactNode
-  noReorder?: boolean
-  onMoveUp?: () => void
-  onMoveDown?: () => void
-  onConfigure?: () => void
+  editMode: boolean; children: React.ReactNode
+  onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
 }) {
   const eBtnStyle: React.CSSProperties = {
     background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '3px',
@@ -122,37 +108,14 @@ function Widget({
     fontFamily: 'var(--font-mono)', lineHeight: 1.4,
   }
   return (
-    <div style={{ border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden', outline: editMode ? '1px dashed rgba(255,255,255,0.06)' : 'none' }}>
+    <div style={{ border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden' }}>
       <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)' }}>
-        {editMode && (
-          noReorder ? (
-            <div style={{ display: 'flex', gap: '2px', flexShrink: 0 }}>
-              <button onClick={onMoveUp} disabled={!onMoveUp} title="Move up"
-                style={{ ...eBtnStyle, opacity: onMoveUp ? 1 : 0.3, cursor: onMoveUp ? 'pointer' : 'default', padding: '1px 5px' }}>↑</button>
-              <button onClick={onMoveDown} disabled={!onMoveDown} title="Move down"
-                style={{ ...eBtnStyle, opacity: onMoveDown ? 1 : 0.3, cursor: onMoveDown ? 'pointer' : 'default', padding: '1px 5px' }}>↓</button>
-            </div>
-          ) : (
-            <span
-              {...dragAttributes}
-              {...dragListeners}
-              style={{ color: 'var(--color-subtle)', cursor: 'grab', fontSize: '16px', lineHeight: 1, flexShrink: 0, touchAction: 'none', userSelect: 'none', padding: '0 2px' }}
-              title="Drag to reorder"
-            >
-              ⠿
-            </span>
-          )
-        )}
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', flex: 1 }}>{title}</span>
         {editMode ? (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            {onConfigure && (
-              <button onClick={onConfigure} style={eBtnStyle} title="Configure widget">⚙</button>
-            )}
-            <button onClick={onToggleWidth} style={eBtnStyle} title={width === 'full' ? 'Make half width' : 'Make full width'}>
-              {width === 'full' ? '½' : '■'}
-            </button>
-            <button onClick={onRemove} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }}>×</button>
+            {onConfigure && <button onClick={onConfigure} style={eBtnStyle} title="Configure">&#9881;</button>}
+            <button onClick={onPickSlot} style={eBtnStyle} title="Change panel">&#9998;</button>
+            <button onClick={onClear} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }} title="Remove">&#215;</button>
           </div>
         ) : link ? (
           <Link to={link} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', textDecoration: 'none' }}>
@@ -161,6 +124,34 @@ function Widget({
         ) : null}
       </div>
       {children}
+    </div>
+  )
+}
+
+// ─── Empty slot ───────────────────────────────────────────────────────────────
+
+function EmptySlot({ editMode, onClick }: { editMode: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false)
+  return (
+    <div
+      onClick={editMode ? onClick : undefined}
+      onMouseEnter={() => { if (editMode) setHovered(true) }}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        border: `1px dashed ${hovered ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
+        borderRadius: '8px',
+        minHeight: '120px',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
+        gap: '7px',
+        cursor: editMode ? 'pointer' : 'default',
+        background: hovered ? 'rgba(255,255,255,0.02)' : 'transparent',
+        transition: 'border-color 0.12s, background 0.12s',
+      }}
+    >
+      <span style={{ fontSize: '16px', color: hovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', lineHeight: 1, transition: 'color 0.12s' }}>+</span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: hovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', letterSpacing: '0.08em', transition: 'color 0.12s' }}>
+        Add a panel.
+      </span>
     </div>
   )
 }
@@ -1274,113 +1265,136 @@ function TravelAdvisoriesContent() {
   )
 }
 
-// ─── Widget registry ──────────────────────────────────────────────────────────
+// ─── Panel registry ───────────────────────────────────────────────────────────
 
-interface WidgetDef {
-  id: string; label: string; description: string
-  defaultWidth: 'full' | 'half'
-  link?: string; linkLabel?: string
-  configurable?: boolean
+interface PanelDef {
+  id: string; label: string; description: string; category: string
+  link?: string; linkLabel?: string; configurable?: boolean
 }
 
-const WIDGET_DEFS: WidgetDef[] = [
-  { id: 'alerts',        label: 'Active Alerts',   description: 'Severe and Extreme events from all sources',        defaultWidth: 'full',  link: '/feed',      linkLabel: 'View feed' },
-  { id: 'map',           label: 'Live Map',         description: 'Interactive map with live event markers',           defaultWidth: 'full',  link: '/map',       linkLabel: 'Full map' },
-  { id: 'event_counts',  label: 'Event Summary',    description: 'Active event counts by severity, source, and type', defaultWidth: 'half',  link: '/feed',      linkLabel: 'View feed' },
-  { id: 'news',          label: 'Latest News',      description: 'Verified news from curated sources',               defaultWidth: 'half',  link: '/feed',      linkLabel: 'View all', configurable: true },
-  { id: 'community',     label: 'Community',        description: 'Latest community posts and discussions',            defaultWidth: 'half',  link: '/community', linkLabel: 'View all' },
-  { id: 'field_reports', label: 'Field Reports',    description: 'Ground-level reports from members',                 defaultWidth: 'half',  link: '/community', linkLabel: 'View all' },
-  { id: 'quick_actions', label: 'Quick Actions',    description: 'Navigation links and auth actions',                 defaultWidth: 'half' },
-  { id: 'inventory',     label: 'Inventory Status', description: 'Summary of your prep inventory',                   defaultWidth: 'half',  link: '/tools',     linkLabel: 'Manage' },
-  { id: 'top_guides',    label: 'Top Guides',       description: 'Highest rated guides from the compendium',          defaultWidth: 'half',  link: '/compendium', linkLabel: 'View all' },
-  { id: 'radar_widget',       label: 'Radar',               description: 'Live weather radar overlay',                                defaultWidth: 'half',  link: '/map',        linkLabel: 'Full map' },
-  { id: 'markets',            label: 'Markets',             description: 'Gold, silver, oil, and stock index prices',                defaultWidth: 'half', configurable: true },
-  { id: 'economic_signals',   label: 'Economic Signals',    description: 'Yield curve, CPI, M2 money supply, bank failures',           defaultWidth: 'half' },
-  { id: 'space_weather',      label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts',         defaultWidth: 'half' },
-  { id: 'recalls',            label: 'Active Recalls',      description: 'Recent FDA and USDA food and drug recall alerts',            defaultWidth: 'half' },
-  { id: 'crypto',             label: 'Crypto',              description: 'Bitcoin and Ethereum spot prices with 24h change',            defaultWidth: 'half' },
-  { id: 'drought',            label: 'Drought Monitor',     description: 'US drought coverage by level from NOAA/USDA/NIDIS',           defaultWidth: 'half' },
-
-  { id: 'near_earth',         label: 'Near Earth Objects',  description: 'Upcoming asteroid and comet close approaches from NASA',       defaultWidth: 'half' },
-  { id: 'storm_threats',      label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories from NHC and PTWC',   defaultWidth: 'half' },
-  { id: 'cisa_alerts',        label: 'CISA Alerts',         description: 'Cybersecurity advisories and alerts from CISA',               defaultWidth: 'half' },
-  { id: 'travel_advisories',  label: 'Travel Advisories',   description: 'US State Department travel advisories by country',            defaultWidth: 'half' },
+const PANEL_DEFS: PanelDef[] = [
+  { id: 'alerts',           label: 'Active Alerts',      description: 'Severe and Extreme events from all sources',          category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed' },
+  { id: 'map',              label: 'Live Map',            description: 'Interactive map with live event markers',             category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
+  { id: 'event_counts',     label: 'Event Summary',       description: 'Active event counts by severity, source, and type',  category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed' },
+  { id: 'radar_widget',     label: 'Radar',               description: 'Live weather radar overlay',                         category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
+  { id: 'storm_threats',    label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories',             category: 'Situational Awareness' },
+  { id: 'news',             label: 'Latest News',         description: 'Verified news from curated sources',                 category: 'News & Intel',          link: '/feed',       linkLabel: 'View all', configurable: true },
+  { id: 'space_weather',    label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts', category: 'News & Intel' },
+  { id: 'cisa_alerts',      label: 'CISA Alerts',         description: 'Cybersecurity advisories and alerts from CISA',     category: 'News & Intel' },
+  { id: 'travel_advisories',label: 'Travel Advisories',   description: 'US State Department travel advisories by country',  category: 'News & Intel' },
+  { id: 'recalls',          label: 'Active Recalls',      description: 'Recent FDA and USDA food and drug recall alerts',   category: 'News & Intel' },
+  { id: 'community',        label: 'Community',           description: 'Latest community posts and discussions',             category: 'Community',             link: '/community',  linkLabel: 'View all' },
+  { id: 'field_reports',    label: 'Field Reports',       description: 'Ground-level reports from members',                 category: 'Community',             link: '/community',  linkLabel: 'View all' },
+  { id: 'top_guides',       label: 'Top Guides',          description: 'Highest rated guides from the compendium',          category: 'Community',             link: '/compendium', linkLabel: 'View all' },
+  { id: 'markets',          label: 'Markets',             description: 'Gold, silver, oil, and stock index prices',         category: 'Economic', configurable: true },
+  { id: 'economic_signals', label: 'Economic Signals',    description: 'Yield curve, CPI, M2 money supply, bank failures',  category: 'Economic' },
+  { id: 'crypto',           label: 'Crypto',              description: 'Bitcoin and Ethereum spot prices with 24h change',  category: 'Economic' },
+  { id: 'drought',          label: 'Drought Monitor',     description: 'US drought coverage by level from NOAA/USDA/NIDIS',category: 'Economic' },
+  { id: 'near_earth',       label: 'Near Earth Objects',  description: 'Upcoming asteroid and comet close approaches from NASA', category: 'Science' },
+  { id: 'quick_actions',    label: 'Quick Actions',       description: 'Navigation links and auth actions',                 category: 'Tools' },
+  { id: 'inventory',        label: 'Inventory Status',    description: 'Summary of your prep inventory',                   category: 'Tools',                 link: '/tools',      linkLabel: 'Manage' },
 ]
 
-// ─── Widget content dispatcher ───────────────────────────────────────────────
+const PANEL_CATEGORIES = ['Situational Awareness', 'News & Intel', 'Community', 'Economic', 'Science', 'Tools']
 
-function renderWidgetContent(
-  id: string,
+// ─── Panel content dispatcher ────────────────────────────────────────────────
+
+function renderPanelContent(
+  type: string,
   data: DashData,
   user: { username: string } | null,
   config?: Record<string, unknown>,
   onSetConfig?: (update: Record<string, unknown>) => void,
 ) {
-  switch (id) {
-    case 'alerts':        return <AlertsContent data={data} />
-    case 'map':           return <MapContent data={data} />
-    case 'event_counts':  return <EventCountsContent data={data} />
-    case 'news':          return <NewsContent data={data} config={config} onSetConfig={onSetConfig} />
-    case 'community':     return <CommunityContent data={data} />
-    case 'field_reports': return <FieldReportsContent data={data} />
-    case 'quick_actions': return <QuickActionsContent user={user} />
-    case 'inventory':         return <InventoryContent />
-    case 'top_guides':        return <TopGuidesContent />
-    case 'radar_widget':      return <RadarWidgetContent />
-    case 'markets':           return <MarketsContent config={config} onSetConfig={onSetConfig} />
-    case 'economic_signals':  return <EconomicSignalsContent />
-    case 'space_weather':     return <SpaceWeatherContent />
-    case 'recalls':           return <RecallsContent />
-    case 'crypto':            return <CryptoContent />
-    case 'drought':           return <DroughtContent />
-
-    case 'near_earth':        return <NearEarthContent />
-    case 'storm_threats':     return <StormThreatsContent />
-    case 'cisa_alerts':       return <CisaAlertsContent />
-    case 'travel_advisories': return <TravelAdvisoriesContent />
+  switch (type) {
+    case 'alerts':           return <AlertsContent data={data} />
+    case 'map':              return <MapContent data={data} />
+    case 'event_counts':     return <EventCountsContent data={data} />
+    case 'news':             return <NewsContent data={data} config={config} onSetConfig={onSetConfig} />
+    case 'community':        return <CommunityContent data={data} />
+    case 'field_reports':    return <FieldReportsContent data={data} />
+    case 'quick_actions':    return <QuickActionsContent user={user} />
+    case 'inventory':        return <InventoryContent />
+    case 'top_guides':       return <TopGuidesContent />
+    case 'radar_widget':     return <RadarWidgetContent />
+    case 'markets':          return <MarketsContent config={config} onSetConfig={onSetConfig} />
+    case 'economic_signals': return <EconomicSignalsContent />
+    case 'space_weather':    return <SpaceWeatherContent />
+    case 'recalls':          return <RecallsContent />
+    case 'crypto':           return <CryptoContent />
+    case 'drought':          return <DroughtContent />
+    case 'near_earth':       return <NearEarthContent />
+    case 'storm_threats':    return <StormThreatsContent />
+    case 'cisa_alerts':      return <CisaAlertsContent />
+    case 'travel_advisories':return <TravelAdvisoriesContent />
     default: return null
   }
 }
 
-// ─── Sortable Widget ──────────────────────────────────────────────────────────
+// ─── Panel picker modal ───────────────────────────────────────────────────────
 
-function SortableWidget({
-  item, def, editMode, isMobile, data, user, onToggleWidth, onRemove, onSetConfig,
-}: {
-  item: LayoutItem; def: WidgetDef; editMode: boolean; isMobile: boolean
-  data: DashData; user: { username: string } | null
-  onToggleWidth: () => void; onRemove: () => void
-  onSetConfig: (update: Record<string, unknown>) => void
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
-  const applyTransform = !isDragging
-  const onConfigure = def.configurable
-    ? () => onSetConfig({ _open: !(item.config?._open) })
-    : undefined
+function PanelPicker({ onSelect, onClose }: { onSelect: (id: string) => void; onClose: () => void }) {
   return (
     <div
-      ref={setNodeRef}
-      style={{
-        gridColumn: item.width === 'full' || isMobile ? '1 / -1' : 'span 1',
-        transform: applyTransform ? CSS.Transform.toString(transform) : undefined,
-        transition: applyTransform ? transition : undefined,
-        opacity: isDragging ? 0 : 1,
-      }}
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}
     >
-      <Widget
-        title={def.label}
-        link={!editMode ? def.link : undefined}
-        linkLabel={def.linkLabel}
-        editMode={editMode}
-        dragListeners={listeners as Record<string, unknown>}
-        dragAttributes={attributes as Record<string, unknown>}
-        onToggleWidth={onToggleWidth}
-        onRemove={onRemove}
-        onConfigure={onConfigure}
-        width={item.width}
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '10px', width: '100%', maxWidth: '500px', maxHeight: '72vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
       >
-        {renderWidgetContent(item.id, data, user, item.config, onSetConfig)}
-      </Widget>
+        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>Select Panel</span>
+          <button onClick={onClose} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', fontSize: '18px', lineHeight: 1, padding: '0 2px' }}>&#215;</button>
+        </div>
+        <div style={{ overflow: 'auto', padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {PANEL_CATEGORIES.map(cat => {
+            const panels = PANEL_DEFS.filter(p => p.category === cat)
+            return (
+              <div key={cat}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: '8px' }}>{cat}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {panels.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => onSelect(p.id)}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'transparent', cursor: 'pointer', textAlign: 'left', width: '100%' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-accent)'; e.currentTarget.style.background = 'rgba(34,197,94,0.05)' }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = 'transparent' }}
+                    >
+                      <span style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>{p.label}</span>
+                      <span style={{ fontFamily: 'var(--font-body)', fontSize: '11px', color: 'var(--color-subtle)' }}>{p.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Confirm dialog ───────────────────────────────────────────────────────────
+
+function ConfirmDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+      <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '10px', padding: '24px', maxWidth: '360px', width: '100%' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '10px' }}>Change Column Layout?</div>
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', lineHeight: 1.5, marginBottom: '20px' }}>
+          Switching column count resets all slot assignments. Your current layout will be cleared.
+        </div>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{ padding: '7px 16px', borderRadius: '6px', fontSize: '13px', fontFamily: 'var(--font-display)', cursor: 'pointer', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)' }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} style={{ padding: '7px 16px', borderRadius: '6px', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#EF4444' }}>
+            Reset and Switch
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1397,10 +1411,15 @@ export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [layout, setLayout] = useState<LayoutItem[]>(loadLayout)
+  const [columns, setColumns] = useState<ColMode>(DEFAULT_PREFS.columns)
+  const [rows, setRows] = useState(DEFAULT_PREFS.rows)
+  const [slots, setSlots] = useState<Record<string, SlotEntry | null>>(DEFAULT_PREFS.slots)
   const [editMode, setEditMode] = useState(false)
-  const [activeId, setActiveId] = useState<string | null>(null)
-  const layoutSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [pickerSlot, setPickerSlot] = useState<string | null>(null)
+  const [confirmColumns, setConfirmColumns] = useState<ColMode | null>(null)
+
+  const hydratedRef = useRef(false)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     async function fetchData() {
@@ -1419,97 +1438,144 @@ export default function Dashboard() {
     return () => clearInterval(id)
   }, [])
 
-  // Hydrate layout from server preferences when user first loads
-  const hydratedRef = useRef(false)
   useEffect(() => {
     if (!user || hydratedRef.current) return
-    const serverLayout = (user.preferences as { dashboard_layout?: LayoutItem[] } | undefined)?.dashboard_layout
-    if (serverLayout && Array.isArray(serverLayout) && serverLayout.length > 0) {
-      setLayout(serverLayout)
-    }
     hydratedRef.current = true
+    const pref = (user.preferences as { dashboard?: DashboardPrefs } | undefined)?.dashboard
+    if (pref?.columns && pref?.rows && pref?.slots) {
+      setColumns(pref.columns)
+      setRows(pref.rows)
+      setSlots(pref.slots)
+    }
   }, [user])
 
-  // Persist layout to localStorage; debounce-save to server for logged-in users
   useEffect(() => {
-    localStorage.setItem(LS_LAYOUT, JSON.stringify(layout))
     if (!user) return
-    if (layoutSaveTimer.current) clearTimeout(layoutSaveTimer.current)
-    layoutSaveTimer.current = setTimeout(() => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => {
       fetch('/api/users/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ preferences: { dashboard_layout: layout } }),
+        body: JSON.stringify({ preferences: { dashboard: { columns, rows, slots } } }),
       }).catch(() => {})
     }, 2000)
-    return () => { if (layoutSaveTimer.current) clearTimeout(layoutSaveTimer.current) }
-  }, [layout])
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
+  }, [columns, rows, slots, user])
+
+  useEffect(() => {
+    if (editMode) return
+    setSlots(prev => {
+      const next = { ...prev }
+      let changed = false
+      for (const key of Object.keys(next)) {
+        const slot = next[key]
+        if (slot?.config?._open) {
+          next[key] = { ...slot, config: { ...slot.config, _open: false } }
+          changed = true
+        }
+      }
+      return changed ? next : prev
+    })
+  }, [editMode])
 
   const data: DashData = { events, news, posts, loading }
   const severeCount = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
-  const inLayout = new Set(layout.map(l => l.id))
-  const available = WIDGET_DEFS.filter(w => !inLayout.has(w.id))
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  )
-
-  function handleDragStart(event: DragStartEvent) {
-    setActiveId(event.active.id as string)
+  function setSlotConfig(key: string, update: Record<string, unknown>) {
+    setSlots(prev => {
+      const slot = prev[key]
+      if (!slot) return prev
+      return { ...prev, [key]: { ...slot, config: { ...slot.config, ...update } } }
+    })
   }
 
-  function handleDragEnd(event: DragEndEvent) {
-    setActiveId(null)
-    const { active, over } = event
-    if (over && active.id !== over.id) {
-      setLayout(prev => {
-        const oldIndex = prev.findIndex(l => l.id === active.id)
-        const newIndex = prev.findIndex(l => l.id === over.id)
-        return arrayMove(prev, oldIndex, newIndex)
-      })
+  function handlePickerSelect(panelId: string) {
+    if (pickerSlot === null) return
+    setSlots(prev => ({ ...prev, [pickerSlot]: { type: panelId, config: {} } }))
+    setPickerSlot(null)
+  }
+
+  function applyColumnSwitch(mode: ColMode) {
+    setColumns(mode)
+    setRows(3)
+    setSlots({})
+    setConfirmColumns(null)
+  }
+
+  function handleColumnChange(mode: ColMode) {
+    if (mode === columns) return
+    const anyFilled = Object.values(slots).some(s => s !== null)
+    if (anyFilled) {
+      setConfirmColumns(mode)
+    } else {
+      applyColumnSwitch(mode)
     }
   }
 
-  function toggleWidth(idx: number) {
-    setLayout(prev => prev.map((item, i) => i === idx ? { ...item, width: item.width === 'full' ? 'half' : 'full' } : item))
-  }
-  function removeWidget(id: string) {
-    setLayout(prev => prev.filter(item => item.id !== id))
-  }
-  function addWidget(id: string) {
-    const def = WIDGET_DEFS.find(w => w.id === id)
-    setLayout(prev => [...prev, { id, width: def?.defaultWidth ?? 'half' }])
-  }
-  function resetLayout() {
-    setLayout(DEFAULT_LAYOUT)
-  }
-  function setWidgetConfig(id: string, update: Record<string, unknown>) {
-    setLayout(prev => prev.map(item =>
-      item.id === id ? { ...item, config: { ...item.config, ...update } } : item
-    ))
-  }
-  function moveWidget(id: string, dir: -1 | 1) {
-    setLayout(prev => {
-      const idx = prev.findIndex(l => l.id === id)
-      const next = idx + dir
-      if (next < 0 || next >= prev.length) return prev
-      const arr = [...prev]
-      ;[arr[idx], arr[next]] = [arr[next], arr[idx]]
-      return arr
+  function removeRow(rowIdx: number) {
+    const numCols = columns as number
+    const total = rows * numCols
+    setSlots(prev => {
+      const next: Record<string, SlotEntry | null> = {}
+      let newIdx = 0
+      for (let i = 0; i < total; i++) {
+        if (Math.floor(i / numCols) === rowIdx) continue
+        next[String(newIdx)] = prev[String(i)] ?? null
+        newIdx++
+      }
+      return next
     })
+    setRows(r => r - 1)
+  }
+
+  function renderSlot(key: string) {
+    const slot = slots[key] ?? null
+    const def = slot ? PANEL_DEFS.find(p => p.id === slot.type) : null
+    if (!slot || !def) {
+      return <EmptySlot key={key} editMode={editMode} onClick={() => setPickerSlot(key)} />
+    }
+    const onConfigure = def.configurable
+      ? () => setSlotConfig(key, { _open: !slot.config._open })
+      : undefined
+    return (
+      <Panel
+        key={key}
+        title={def.label}
+        link={!editMode ? def.link : undefined}
+        linkLabel={def.linkLabel}
+        editMode={editMode}
+        onPickSlot={() => setPickerSlot(key)}
+        onClear={() => setSlots(prev => ({ ...prev, [key]: null }))}
+        onConfigure={onConfigure}
+      >
+        {renderPanelContent(slot.type, data, user, slot.config, u => setSlotConfig(key, u))}
+      </Panel>
+    )
   }
 
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
+  const colBtnStyle = (active: boolean): React.CSSProperties => ({
+    padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
+    border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
+    background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
+    color: active ? 'var(--color-accent)' : 'var(--color-muted)',
+  })
+
+  const COL_MODES: { value: ColMode; label: string }[] = [
+    { value: 1, label: '1' },
+    { value: 2, label: '2' },
+    { value: 3, label: '3' },
+    { value: 'focus', label: 'Focus' },
+  ]
+
   return (
     <div>
-      {/* SITREP Header */}
       <div style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
         <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '20px 24px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-          {/* Left: live indicator + title + time */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
               <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--color-accent)', display: 'inline-block', animation: 'pulse-green 2s ease-in-out infinite' }} />
@@ -1518,31 +1584,31 @@ export default function Dashboard() {
             <span style={{ fontFamily: 'var(--font-display)', fontSize: isMobile ? '18px' : '22px', fontWeight: 700, color: 'var(--color-text)', letterSpacing: '-0.01em' }}>SITREP</span>
             {!isMobile && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', letterSpacing: '0.06em' }}>{dateStr} · {timeStr}</span>}
           </div>
-
-          {/* Right: severe badge + edit */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-            {severeCount > 0 && (
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '5px', padding: '4px 10px' }}>
-                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#EF4444', display: 'inline-block' }} />
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#EF4444', letterSpacing: '0.04em' }}>
-                  {severeCount} severe
-                </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, flexWrap: 'wrap' }}>
+            {editMode && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginRight: '2px' }}>Cols</span>
+                {COL_MODES.map(m => (
+                  <button key={String(m.value)} onClick={() => handleColumnChange(m.value)} style={colBtnStyle(columns === m.value)}>
+                    {m.label}
+                  </button>
+                ))}
               </div>
             )}
-            {severeCount === 0 && !loading && (
+            {!editMode && severeCount > 0 && (
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '5px', padding: '4px 10px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#EF4444', display: 'inline-block' }} />
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#EF4444', letterSpacing: '0.04em' }}>{severeCount} severe</span>
+              </div>
+            )}
+            {!editMode && severeCount === 0 && !loading && (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: '5px', padding: '4px 10px' }}>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-accent)', letterSpacing: '0.04em' }}>All clear</span>
               </div>
             )}
             <button
               onClick={() => setEditMode(v => !v)}
-              style={{
-                padding: '5px 12px', borderRadius: '5px', fontSize: '12px',
-                fontFamily: 'var(--font-display)', fontWeight: 500, cursor: 'pointer',
-                border: `1px solid ${editMode ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                background: editMode ? 'rgba(34,197,94,0.1)' : 'transparent',
-                color: editMode ? 'var(--color-accent)' : 'var(--color-muted)',
-              }}
+              style={{ padding: '5px 12px', borderRadius: '5px', fontSize: '12px', fontFamily: 'var(--font-display)', fontWeight: 500, cursor: 'pointer', border: `1px solid ${editMode ? 'var(--color-accent)' : 'var(--color-border)'}`, background: editMode ? 'rgba(34,197,94,0.1)' : 'transparent', color: editMode ? 'var(--color-accent)' : 'var(--color-muted)' }}
             >
               {editMode ? 'Done' : 'Edit Layout'}
             </button>
@@ -1555,109 +1621,82 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* Widget grid */}
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '24px' }}>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-          {/* Map is excluded from SortableContext -- it is never a drag source or
-              drop target, so dnd-kit never applies transforms to it or registers
-              it for collision detection. Other widgets sort around it freely. */}
-          <SortableContext items={layout.filter(l => !MAP_WIDGETS.has(l.id)).map(l => l.id)} strategy={rectSortingStrategy}>
-            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '14px' }}>
-              {layout.map((item, idx) => {
-                const def = WIDGET_DEFS.find(w => w.id === item.id)
-                if (!def) return null
-
-                if (MAP_WIDGETS.has(item.id)) {
-                  return (
-                    <div
-                      key={`${item.id}-${idx}`}
-                      style={{ gridColumn: item.width === 'full' || isMobile ? '1 / -1' : 'span 1', position: 'relative', zIndex: 1 }}
-                    >
-                      <Widget
-                        title={def.label}
-                        link={!editMode ? def.link : undefined}
-                        linkLabel={def.linkLabel}
-                        editMode={editMode}
-                        onToggleWidth={() => toggleWidth(idx)}
-                        onRemove={() => removeWidget(item.id)}
-                        width={item.width}
-                        noReorder
-                        onMoveUp={editMode && idx > 0 ? () => moveWidget(item.id, -1) : undefined}
-                        onMoveDown={editMode && idx < layout.length - 1 ? () => moveWidget(item.id, 1) : undefined}
-                      >
-                        {renderWidgetContent(item.id, data, user, item.config, (u) => setWidgetConfig(item.id, u))}
-                      </Widget>
-                    </div>
-                  )
-                }
-
-                return (
-                  <SortableWidget
-                    key={item.id}
-                    item={item}
-                    def={def}
-                    editMode={editMode}
-                    isMobile={isMobile}
-                    data={data}
-                    user={user}
-                    onToggleWidth={() => toggleWidth(idx)}
-                    onRemove={() => removeWidget(item.id)}
-                    onSetConfig={(u) => setWidgetConfig(item.id, u)}
-                  />
-                )
-              })}
+        {columns === 'focus' && !isMobile ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px', alignItems: 'start' }}>
+            {renderSlot('0')}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {[1, 2, 3].map(i => renderSlot(String(i)))}
             </div>
-          </SortableContext>
-          <DragOverlay dropAnimation={null}>
-            {activeId ? (() => {
-              const item = layout.find(l => l.id === activeId)
-              const def = WIDGET_DEFS.find(w => w.id === activeId)
-              if (!item || !def) return null
+          </div>
+        ) : columns === 'focus' && isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {[0, 1, 2, 3].map(i => renderSlot(String(i)))}
+          </div>
+        ) : isMobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {Array.from({ length: rows * (columns as number) }, (_, i) => renderSlot(String(i)))}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            {Array.from({ length: rows }, (_, rowIdx) => {
+              const numCols = columns as number
+              const rowKeys = Array.from({ length: numCols }, (_, c) => String(rowIdx * numCols + c))
+              const allEmpty = rowKeys.every(k => !(slots[k]))
               return (
-                <div style={{ opacity: 0.92, boxShadow: '0 12px 40px rgba(0,0,0,0.6)', borderRadius: '8px', cursor: 'grabbing' }}>
-                  <Widget
-                    title={def.label}
-                    editMode={false}
-                    onToggleWidth={() => {}}
-                    onRemove={() => {}}
-                    width={item.width}
-                  >
-                    {renderWidgetContent(activeId, data, user)}
-                  </Widget>
+                <div key={rowIdx} style={{ position: 'relative' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: '14px' }}>
+                    {rowKeys.map(k => renderSlot(k))}
+                  </div>
+                  {editMode && allEmpty && rows > 1 && (
+                    <button
+                      onClick={() => removeRow(rowIdx)}
+                      style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(239,68,68,0.65)', padding: '2px 8px' }}
+                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; e.currentTarget.style.color = '#EF4444' }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; e.currentTarget.style.color = 'rgba(239,68,68,0.65)' }}
+                    >
+                      Remove Row
+                    </button>
+                  )}
                 </div>
               )
-            })() : null}
-          </DragOverlay>
-        </DndContext>
+            })}
+          </div>
+        )}
 
-        {/* Edit mode: add widgets + reset */}
+        {columns !== 'focus' && editMode && (
+          <div style={{ marginTop: '14px' }}>
+            <button
+              onClick={() => setRows(r => r + 1)}
+              style={{ width: '100%', padding: '10px', background: 'transparent', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em' }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = 'rgba(255,255,255,0.25)' }}
+            >
+              + Add Row
+            </button>
+          </div>
+        )}
+
         {editMode && (
-          <div style={{ marginTop: '16px', border: '1px dashed var(--color-border)', borderRadius: '8px', padding: '20px' }}>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '14px' }}>
-              {available.length > 0 ? 'Add Widget' : 'All widgets are active'}
-            </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: available.length > 0 ? '16px' : '0' }}>
-              {available.map(w => (
-                <button key={w.id} onClick={() => addWidget(w.id)} style={{
-                  padding: '7px 14px', borderRadius: '5px', fontSize: '12px',
-                  fontFamily: 'var(--font-display)', fontWeight: 500, cursor: 'pointer',
-                  border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)',
-                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '2px',
-                }}>
-                  <span>+ {w.label}</span>
-                  <span style={{ fontFamily: 'var(--font-body)', fontSize: '10px', color: 'var(--color-subtle)', fontWeight: 400 }}>{w.description}</span>
-                </button>
-              ))}
-            </div>
-            <button onClick={resetLayout} style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', padding: 0,
-            }}>
+          <div style={{ marginTop: '16px', textAlign: 'center' }}>
+            <button
+              onClick={() => { setColumns(DEFAULT_PREFS.columns); setRows(DEFAULT_PREFS.rows); setSlots(DEFAULT_PREFS.slots) }}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', padding: '4px 0' }}
+              onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-muted)')}
+              onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-subtle)')}
+            >
               Reset to default layout
             </button>
           </div>
         )}
       </div>
+
+      {pickerSlot !== null && (
+        <PanelPicker onSelect={handlePickerSelect} onClose={() => setPickerSlot(null)} />
+      )}
+      {confirmColumns !== null && (
+        <ConfirmDialog onConfirm={() => applyColumnSwitch(confirmColumns)} onCancel={() => setConfirmColumns(null)} />
+      )}
     </div>
   )
 }
