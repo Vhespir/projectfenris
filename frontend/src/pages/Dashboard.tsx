@@ -96,11 +96,12 @@ function GeolocateUser() {
 // ─── Panel wrapper ────────────────────────────────────────────────────────────
 
 function Panel({
-  title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure,
+  title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure, onMoveStart, isMoving,
 }: {
   title: string; link?: string; linkLabel?: string
   editMode: boolean; children: React.ReactNode
   onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
+  onMoveStart?: () => void; isMoving?: boolean
 }) {
   const eBtnStyle: React.CSSProperties = {
     background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '3px',
@@ -108,14 +109,23 @@ function Panel({
     fontFamily: 'var(--font-mono)', lineHeight: 1.4,
   }
   return (
-    <div style={{ border: '1px solid var(--color-border)', borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden' }}>
+    <div style={{ border: `1px solid ${isMoving ? 'var(--color-accent)' : 'var(--color-border)'}`, borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden', boxShadow: isMoving ? '0 0 0 2px rgba(34,197,94,0.2)' : 'none' }}>
       <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)' }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', flex: 1 }}>{title}</span>
         {editMode ? (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             {onConfigure && <button onClick={onConfigure} style={eBtnStyle} title="Configure">&#9881;</button>}
-            <button onClick={onPickSlot} style={eBtnStyle} title="Change panel">&#9998;</button>
-            <button onClick={onClear} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }} title="Remove">&#215;</button>
+            {onMoveStart && (
+              <button
+                onClick={e => { e.stopPropagation(); onMoveStart() }}
+                title={isMoving ? 'Cancel move' : 'Move panel'}
+                style={{ ...eBtnStyle, color: isMoving ? 'var(--color-accent)' : 'var(--color-muted)', borderColor: isMoving ? 'var(--color-accent)' : 'var(--color-border)' }}
+              >
+                &#8645;
+              </button>
+            )}
+            <button onClick={e => { e.stopPropagation(); onPickSlot() }} style={eBtnStyle} title="Change panel">&#9998;</button>
+            <button onClick={e => { e.stopPropagation(); onClear() }} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }} title="Remove">&#215;</button>
           </div>
         ) : link ? (
           <Link to={link} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', textDecoration: 'none' }}>
@@ -130,27 +140,30 @@ function Panel({
 
 // ─── Empty slot ───────────────────────────────────────────────────────────────
 
-function EmptySlot({ editMode, onClick }: { editMode: boolean; onClick: () => void }) {
+function EmptySlot({ editMode, onClick, isMoveTarget }: { editMode: boolean; onClick: () => void; isMoveTarget?: boolean }) {
   const [hovered, setHovered] = useState(false)
+  const active = hovered || isMoveTarget
   return (
     <div
-      onClick={editMode ? onClick : undefined}
-      onMouseEnter={() => { if (editMode) setHovered(true) }}
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        border: `1px dashed ${hovered ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
+        border: `1px dashed ${isMoveTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
         borderRadius: '8px',
         minHeight: '120px',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
         gap: '7px',
-        cursor: editMode ? 'pointer' : 'default',
-        background: hovered ? 'rgba(255,255,255,0.02)' : 'transparent',
+        cursor: (editMode || isMoveTarget) ? 'pointer' : 'default',
+        background: isMoveTarget ? 'rgba(34,197,94,0.04)' : active ? 'rgba(255,255,255,0.02)' : 'transparent',
         transition: 'border-color 0.12s, background 0.12s',
       }}
     >
-      <span style={{ fontSize: '16px', color: hovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', lineHeight: 1, transition: 'color 0.12s' }}>+</span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: hovered ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', letterSpacing: '0.08em', transition: 'color 0.12s' }}>
-        Add a panel.
+      <span style={{ fontSize: '16px', color: isMoveTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', lineHeight: 1, transition: 'color 0.12s' }}>
+        {isMoveTarget ? '⇅' : '+'}
+      </span>
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: isMoveTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', letterSpacing: '0.08em', transition: 'color 0.12s' }}>
+        {isMoveTarget ? 'Move here.' : 'Add a panel.'}
       </span>
     </div>
   )
@@ -1417,6 +1430,7 @@ export default function Dashboard() {
   const [editMode, setEditMode] = useState(false)
   const [pickerSlot, setPickerSlot] = useState<string | null>(null)
   const [confirmColumns, setConfirmColumns] = useState<ColMode | null>(null)
+  const [movingSlot, setMovingSlot] = useState<string | null>(null)
 
   const hydratedRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1465,6 +1479,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (editMode) return
+    setMovingSlot(null)
     setSlots(prev => {
       const next = { ...prev }
       let changed = false
@@ -1478,6 +1493,14 @@ export default function Dashboard() {
       return changed ? next : prev
     })
   }, [editMode])
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setMovingSlot(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const data: DashData = { events, news, posts, loading }
   const severeCount = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
@@ -1529,28 +1552,54 @@ export default function Dashboard() {
     setRows(r => r - 1)
   }
 
+  function swapSlots(a: string, b: string) {
+    setSlots(prev => ({ ...prev, [a]: prev[b] ?? null, [b]: prev[a] ?? null }))
+    setMovingSlot(null)
+  }
+
   function renderSlot(key: string) {
     const slot = slots[key] ?? null
     const def = slot ? PANEL_DEFS.find(p => p.id === slot.type) : null
+    const isMoving = movingSlot === key
+    const isMoveTarget = movingSlot !== null && movingSlot !== key
+
     if (!slot || !def) {
-      return <EmptySlot key={key} editMode={editMode} onClick={() => setPickerSlot(key)} />
+      return (
+        <EmptySlot
+          key={key}
+          editMode={editMode}
+          isMoveTarget={isMoveTarget}
+          onClick={() => { if (isMoveTarget) swapSlots(movingSlot!, key); else if (editMode) setPickerSlot(key) }}
+        />
+      )
     }
+
     const onConfigure = def.configurable
       ? () => setSlotConfig(key, { _open: !slot.config._open })
       : undefined
+
     return (
-      <Panel
-        key={key}
-        title={def.label}
-        link={!editMode ? def.link : undefined}
-        linkLabel={def.linkLabel}
-        editMode={editMode}
-        onPickSlot={() => setPickerSlot(key)}
-        onClear={() => setSlots(prev => ({ ...prev, [key]: null }))}
-        onConfigure={onConfigure}
-      >
-        {renderPanelContent(slot.type, data, user, slot.config, u => setSlotConfig(key, u))}
-      </Panel>
+      <div key={key} style={{ position: 'relative' }}>
+        <Panel
+          title={def.label}
+          link={!editMode ? def.link : undefined}
+          linkLabel={def.linkLabel}
+          editMode={editMode}
+          onPickSlot={() => setPickerSlot(key)}
+          onClear={() => setSlots(prev => ({ ...prev, [key]: null }))}
+          onConfigure={onConfigure}
+          onMoveStart={() => setMovingSlot(isMoving ? null : key)}
+          isMoving={isMoving}
+        >
+          {renderPanelContent(slot.type, data, user, slot.config, u => setSlotConfig(key, u))}
+        </Panel>
+        {isMoveTarget && (
+          <div
+            onClick={() => swapSlots(movingSlot!, key)}
+            style={{ position: 'absolute', inset: 0, borderRadius: '8px', cursor: 'pointer', border: '1px dashed rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.04)', zIndex: 10 }}
+          />
+        )}
+      </div>
     )
   }
 
@@ -1621,6 +1670,14 @@ export default function Dashboard() {
         )}
       </div>
 
+      {movingSlot !== null && (
+        <div style={{ background: 'rgba(34,197,94,0.08)', borderBottom: '1px solid rgba(34,197,94,0.2)', padding: '6px 24px', textAlign: 'center' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(34,197,94,0.8)', letterSpacing: '0.08em' }}>
+            Click any slot to move the panel there. Press Esc to cancel.
+          </span>
+        </div>
+      )}
+
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '24px' }}>
         {columns === 'focus' && !isMobile ? (
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px', alignItems: 'start' }}>
@@ -1637,32 +1694,48 @@ export default function Dashboard() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             {Array.from({ length: rows * (columns as number) }, (_, i) => renderSlot(String(i)))}
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {Array.from({ length: rows }, (_, rowIdx) => {
-              const numCols = columns as number
-              const rowKeys = Array.from({ length: numCols }, (_, c) => String(rowIdx * numCols + c))
-              const allEmpty = rowKeys.every(k => !(slots[k]))
-              return (
-                <div key={rowIdx} style={{ position: 'relative' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: '14px' }}>
-                    {rowKeys.map(k => renderSlot(k))}
-                  </div>
-                  {editMode && allEmpty && rows > 1 && (
-                    <button
-                      onClick={() => removeRow(rowIdx)}
-                      style={{ position: 'absolute', top: '10px', right: '10px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: '4px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(239,68,68,0.65)', padding: '2px 8px' }}
-                      onMouseEnter={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.2)'; e.currentTarget.style.color = '#EF4444' }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(239,68,68,0.1)'; e.currentTarget.style.color = 'rgba(239,68,68,0.65)' }}
-                    >
-                      Remove Row
-                    </button>
-                  )}
+        ) : (() => {
+          const numCols = columns as number
+          const removeRowIdx = (() => {
+            for (let r = rows - 1; r >= 0; r--) {
+              const keys = Array.from({ length: numCols }, (_, c) => String(r * numCols + c))
+              if (keys.every(k => !slots[k])) return r
+            }
+            return null
+          })()
+          return (
+            <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
+              {Array.from({ length: numCols }, (_, colIdx) => (
+                <div key={colIdx} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                  {Array.from({ length: rows }, (_, rowIdx) => renderSlot(String(rowIdx * numCols + colIdx)))}
                 </div>
-              )
-            })}
-          </div>
-        )}
+              ))}
+            </div>
+          )
+        })()}
+
+        {columns !== 'focus' && !isMobile && editMode && (() => {
+          const numCols = columns as number
+          const removeRowIdx = (() => {
+            for (let r = rows - 1; r >= 0; r--) {
+              const keys = Array.from({ length: numCols }, (_, c) => String(r * numCols + c))
+              if (keys.every(k => !slots[k])) return r
+            }
+            return null
+          })()
+          return removeRowIdx !== null && rows > 1 ? (
+            <div style={{ marginTop: '8px', textAlign: 'right' }}>
+              <button
+                onClick={() => removeRow(removeRowIdx)}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(239,68,68,0.5)', padding: '2px 0' }}
+                onMouseEnter={e => (e.currentTarget.style.color = '#EF4444')}
+                onMouseLeave={e => (e.currentTarget.style.color = 'rgba(239,68,68,0.5)')}
+              >
+                Remove empty row
+              </button>
+            </div>
+          ) : null
+        })()}
 
         {columns !== 'focus' && editMode && (
           <div style={{ marginTop: '14px' }}>
