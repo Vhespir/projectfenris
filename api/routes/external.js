@@ -44,22 +44,40 @@ function parseNRCText(text) {
 export async function externalRoutes(app) {
   const H = { 'User-Agent': 'ProjectFenris/1.0 contact@projectfenris.com' }
 
-  // ── Precious metals (gold + silver) ──────────────────────────────────────────
+  // ── Precious metals (gold + silver via Yahoo Finance) ─────────────────────────
   app.get('/external/metals', async (_req, reply) => {
     try {
       const data = await withCache('metals', 5 * 60_000, async () => {
-        const res = await fetch('https://data-asg.goldprice.org/dbXRates/USD', {
-          headers: H, signal: AbortSignal.timeout(10_000),
-        })
-        if (!res.ok) throw new Error(`goldprice ${res.status}`)
-        const json = await res.json()
-        const item = json.items?.[0]
-        if (!item) throw new Error('no items')
-        return {
-          gold:   { price: item.xauPrice,  change_pct: item.pcXau  },
-          silver: { price: item.xagPrice,  change_pct: item.pcXag  },
-          ts: json.ts,
+        const targets = [
+          { sym: 'GC%3DF', label: 'gold' },
+          { sym: 'SI%3DF', label: 'silver' },
+        ]
+        const result = {}
+        for (const t of targets) {
+          try {
+            const url = `https://query1.finance.yahoo.com/v8/finance/chart/${t.sym}?interval=1d&range=1mo`
+            const res = await fetch(url, {
+              headers: { ...H, 'Accept': 'application/json' },
+              signal: AbortSignal.timeout(8_000),
+            })
+            if (!res.ok) continue
+            const json = await res.json()
+            const r = json.chart?.result?.[0]
+            const meta = r?.meta
+            if (!meta) continue
+            const prev = meta.chartPreviousClose ?? meta.previousClose
+            const curr = meta.regularMarketPrice
+            const closes = (r?.indicators?.quote?.[0]?.close ?? [])
+              .filter(v => v != null && typeof v === 'number')
+            result[t.label] = {
+              price: curr,
+              change_pct: prev && curr ? ((curr - prev) / prev) * 100 : null,
+              sparkline: closes.slice(-15),
+            }
+          } catch {}
         }
+        if (!result.gold && !result.silver) throw new Error('no metals data from Yahoo Finance')
+        return result
       })
       return data
     } catch (err) {
@@ -67,30 +85,30 @@ export async function externalRoutes(app) {
     }
   })
 
-  // ── WTI crude oil (EIA v2) ────────────────────────────────────────────────────
+  // ── WTI crude oil (Yahoo Finance CL=F) ───────────────────────────────────────
   app.get('/external/oil', async (_req, reply) => {
-    const key = process.env.EIA_API_KEY
-    if (!key) return reply.code(503).send({ error: 'EIA_API_KEY not configured' })
     try {
-      const data = await withCache('oil', 60 * 60_000, async () => {
-        const url = `https://api.eia.gov/v2/petroleum/pri/spt/data/` +
-          `?api_key=${key}&frequency=daily&data[0]=value` +
-          `&facets[series][]=RWTC&sort[0][column]=period&sort[0][direction]=desc&length=2`
-        const res = await fetch(url, { headers: H, signal: AbortSignal.timeout(15_000) })
-        if (!res.ok) throw new Error(`EIA ${res.status}`)
+      const data = await withCache('oil', 5 * 60_000, async () => {
+        const url = `https://query1.finance.yahoo.com/v8/finance/chart/CL%3DF?interval=1d&range=1mo`
+        const res = await fetch(url, {
+          headers: { ...H, 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8_000),
+        })
+        if (!res.ok) throw new Error(`Yahoo Finance ${res.status}`)
         const json = await res.json()
-        const rows = json.response?.data ?? []
-        if (rows.length < 1) throw new Error('no data')
-        const latest = rows[0]
-        const prev   = rows[1]
-        const change = prev ? latest.value - prev.value : null
-        const change_pct = prev ? (change / prev.value) * 100 : null
+        const r = json.chart?.result?.[0]
+        const meta = r?.meta
+        if (!meta) throw new Error('no oil data')
+        const prev = meta.chartPreviousClose ?? meta.previousClose
+        const curr = meta.regularMarketPrice
+        const closes = (r?.indicators?.quote?.[0]?.close ?? [])
+          .filter(v => v != null && typeof v === 'number')
         return {
-          price:      latest.value,
-          change:     change,
-          change_pct: change_pct,
-          period:     latest.period,
-          unit:       latest.unit ?? 'dollars per barrel',
+          price:      curr,
+          change_pct: prev && curr ? ((curr - prev) / prev) * 100 : null,
+          sparkline:  closes.slice(-15),
+          period:     new Date().toISOString().slice(0, 10),
+          unit:       'dollars per barrel',
         }
       })
       return data

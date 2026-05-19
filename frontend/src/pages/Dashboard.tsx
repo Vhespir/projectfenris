@@ -97,35 +97,82 @@ function GeolocateUser() {
 
 function Panel({
   title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure, onMoveStart, isMoving,
+  onSpanChange, currentSpan, maxSpan, onHeightChange, currentMinHeight,
 }: {
   title: string; link?: string; linkLabel?: string
   editMode: boolean; children: React.ReactNode
   onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
   onMoveStart?: () => void; isMoving?: boolean
+  onSpanChange?: (s: number) => void; currentSpan?: number; maxSpan?: number
+  onHeightChange?: (h: number) => void; currentMinHeight?: number
 }) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null)
+  const onHeightChangeRef = useRef(onHeightChange)
+  onHeightChangeRef.current = onHeightChange
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!dragRef.current || !panelRef.current) return
+      const newH = Math.max(80, dragRef.current.startH + (e.clientY - dragRef.current.startY))
+      panelRef.current.style.minHeight = `${newH}px`
+    }
+    function onMouseUp(e: MouseEvent) {
+      if (!dragRef.current) return
+      const newH = Math.max(80, dragRef.current.startH + (e.clientY - dragRef.current.startY))
+      onHeightChangeRef.current?.(newH)
+      dragRef.current = null
+    }
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp) }
+  }, [])
+
   const eBtnStyle: React.CSSProperties = {
     background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '3px',
     color: 'var(--color-muted)', cursor: 'pointer', fontSize: '12px', padding: '1px 6px',
     fontFamily: 'var(--font-mono)', lineHeight: 1.4,
   }
+  const span = currentSpan ?? 1
+  const maxSpanVal = maxSpan ?? 1
+
   return (
-    <div style={{ border: `1px solid ${isMoving ? 'var(--color-accent)' : 'var(--color-border)'}`, borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden', boxShadow: isMoving ? '0 0 0 2px rgba(34,197,94,0.2)' : 'none' }}>
-      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)' }}>
+    <div
+      ref={panelRef}
+      style={{
+        border: `1px solid ${isMoving ? 'var(--color-accent)' : 'var(--color-border)'}`,
+        borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden',
+        boxShadow: isMoving ? '0 0 0 2px rgba(34,197,94,0.2)' : 'none',
+        minHeight: currentMinHeight ? `${currentMinHeight}px` : undefined,
+        display: 'flex', flexDirection: 'column',
+      }}
+    >
+      <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)', flexShrink: 0 }}>
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', flex: 1 }}>{title}</span>
         {editMode ? (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
-            {onConfigure && <button onClick={onConfigure} style={eBtnStyle} title="Configure">&#9881;</button>}
+            {onConfigure && <button onClick={onConfigure} style={eBtnStyle}>Config</button>}
+            {maxSpanVal > 1 && onSpanChange && (
+              <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', marginRight: '1px' }}>W:</span>
+                {Array.from({ length: maxSpanVal }, (_, i) => i + 1).map(s => (
+                  <button key={s} onClick={e => { e.stopPropagation(); onSpanChange(s) }}
+                    style={{ ...eBtnStyle, padding: '1px 5px', fontSize: '11px', color: s === span ? 'var(--color-accent)' : 'var(--color-muted)', borderColor: s === span ? 'var(--color-accent)' : 'var(--color-border)' }}>
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             {onMoveStart && (
               <button
                 onClick={e => { e.stopPropagation(); onMoveStart() }}
-                title={isMoving ? 'Cancel move' : 'Move panel'}
                 style={{ ...eBtnStyle, color: isMoving ? 'var(--color-accent)' : 'var(--color-muted)', borderColor: isMoving ? 'var(--color-accent)' : 'var(--color-border)' }}
               >
-                &#8645;
+                {isMoving ? 'Moving...' : 'Move'}
               </button>
             )}
-            <button onClick={e => { e.stopPropagation(); onPickSlot() }} style={eBtnStyle} title="Change panel">&#9998;</button>
-            <button onClick={e => { e.stopPropagation(); onClear() }} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }} title="Remove">&#215;</button>
+            <button onClick={e => { e.stopPropagation(); onPickSlot() }} style={eBtnStyle}>Change</button>
+            <button onClick={e => { e.stopPropagation(); onClear() }} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }}>Remove</button>
           </div>
         ) : link ? (
           <Link to={link} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', textDecoration: 'none' }}>
@@ -133,7 +180,18 @@ function Panel({
           </Link>
         ) : null}
       </div>
-      {children}
+      <div style={{ flex: 1 }}>{children}</div>
+      {editMode && onHeightChange && (
+        <div
+          onMouseDown={e => {
+            e.preventDefault()
+            dragRef.current = { startY: e.clientY, startH: panelRef.current?.offsetHeight ?? 120 }
+          }}
+          style={{ height: '8px', cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px solid var(--color-border)', flexShrink: 0 }}
+        >
+          <div style={{ width: '28px', height: '2px', borderRadius: '1px', background: 'rgba(255,255,255,0.15)' }} />
+        </div>
+      )}
     </div>
   )
 }
@@ -701,8 +759,9 @@ function TopGuidesContent() {
 
 // ─── Widget: Markets (Metals / Oil / Indices) ─────────────────────────────────
 
-interface MetalsData { gold: { price: number; change_pct: number }; silver: { price: number; change_pct: number } }
-interface OilData { price: number; change_pct: number | null; period: string; unit: string }
+interface MetalQuote { price: number; change_pct: number | null; sparkline?: number[] }
+interface MetalsData { gold?: MetalQuote; silver?: MetalQuote }
+interface OilData { price: number; change_pct: number | null; period: string; unit: string; sparkline?: number[] }
 interface StockItem { label: string; price: number; change_pct: number | null; sparkline?: number[] }
 
 function Sparkline({ data, positive }: { data: number[]; positive: boolean }) {
@@ -794,16 +853,18 @@ function MarketsContent({ config, onSetConfig }: { config?: Record<string, unkno
     ['NASDAQ',  'showNasdaq', showNasdaq],
   ]
 
+  const fmtUSD2 = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {showGold   && (goldPrice   != null ? <PriceRow label="Gold"    price={goldPrice}   changePct={metals!.gold.change_pct   ?? null} fmt={n => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`} /> : <UnavailableRow label="Gold" />)}
-      {showSilver && (silverPrice != null ? <PriceRow label="Silver"  price={silverPrice} changePct={metals!.silver.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} /> : <UnavailableRow label="Silver" />)}
-      {showOil    && (oilPrice    != null ? <PriceRow label="WTI"     price={oilPrice}    changePct={oil!.change_pct           ?? null} fmt={n => `$${n.toFixed(2)}`} /> : <UnavailableRow label="WTI" />)}
+      {showGold   && (goldPrice   != null ? <PriceRow label="Gold"    price={goldPrice}   changePct={metals!.gold!.change_pct   ?? null} fmt={fmtUSD2} sparkline={metals!.gold!.sparkline} /> : <UnavailableRow label="Gold" />)}
+      {showSilver && (silverPrice != null ? <PriceRow label="Silver"  price={silverPrice} changePct={metals!.silver!.change_pct ?? null} fmt={n => `$${n.toFixed(2)}`} sparkline={metals!.silver!.sparkline} /> : <UnavailableRow label="Silver" />)}
+      {showOil    && (oilPrice    != null ? <PriceRow label="WTI"     price={oilPrice}    changePct={oil!.change_pct            ?? null} fmt={n => `$${n.toFixed(2)}`} sparkline={oil!.sparkline} /> : <UnavailableRow label="WTI" />)}
       {showSP500  && (stockMap['S&P 500'] ? <PriceRow label="S&P 500" price={stockMap['S&P 500'].price}  changePct={stockMap['S&P 500'].change_pct}  fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} sparkline={stockMap['S&P 500'].sparkline} /> : <UnavailableRow label="S&P 500" />)}
       {showDow    && (stockMap['Dow']     ? <PriceRow label="Dow"     price={stockMap['Dow'].price}       changePct={stockMap['Dow'].change_pct}       fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} sparkline={stockMap['Dow'].sparkline} />     : <UnavailableRow label="Dow" />)}
       {showNasdaq && (stockMap['NASDAQ']  ? <PriceRow label="NASDAQ"  price={stockMap['NASDAQ'].price}    changePct={stockMap['NASDAQ'].change_pct}    fmt={n => n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} sparkline={stockMap['NASDAQ'].sparkline} />  : <UnavailableRow label="NASDAQ" />)}
       <div style={{ padding: '6px 16px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>
-        Gold/Silver: GoldPrice.org{oil?.period ? ` · WTI: EIA` : ''}{stocks?.length ? ' · Indices: Yahoo Finance' : ''}
+        Yahoo Finance · 1mo daily
       </div>
       {configOpen && onSetConfig && (
         <div style={{ padding: '12px 16px', borderTop: '1px solid var(--color-border)', background: 'rgba(0,0,0,0.15)' }}>
@@ -1562,15 +1623,19 @@ export default function Dashboard() {
     const def = slot ? PANEL_DEFS.find(p => p.id === slot.type) : null
     const isMoving = movingSlot === key
     const isMoveTarget = movingSlot !== null && movingSlot !== key
+    const numCols = typeof columns === 'number' ? columns : 2
+    const span = typeof slot?.config?.span === 'number' ? Math.min(slot.config.span, numCols) : 1
+    const spanStyle: React.CSSProperties = span > 1 ? { gridColumn: `span ${span}` } : {}
 
     if (!slot || !def) {
       return (
-        <EmptySlot
-          key={key}
-          editMode={editMode}
-          isMoveTarget={isMoveTarget}
-          onClick={() => { if (isMoveTarget) swapSlots(movingSlot!, key); else if (editMode) setPickerSlot(key) }}
-        />
+        <div key={key} style={spanStyle}>
+          <EmptySlot
+            editMode={editMode}
+            isMoveTarget={isMoveTarget}
+            onClick={() => { if (isMoveTarget) swapSlots(movingSlot!, key); else if (editMode) setPickerSlot(key) }}
+          />
+        </div>
       )
     }
 
@@ -1579,7 +1644,7 @@ export default function Dashboard() {
       : undefined
 
     return (
-      <div key={key} style={{ position: 'relative' }}>
+      <div key={key} style={{ position: 'relative', ...spanStyle }}>
         <Panel
           title={def.label}
           link={!editMode ? def.link : undefined}
@@ -1590,6 +1655,11 @@ export default function Dashboard() {
           onConfigure={onConfigure}
           onMoveStart={() => setMovingSlot(isMoving ? null : key)}
           isMoving={isMoving}
+          currentSpan={span}
+          maxSpan={numCols}
+          onSpanChange={s => setSlotConfig(key, { span: s })}
+          currentMinHeight={typeof slot.config.minHeight === 'number' ? slot.config.minHeight : undefined}
+          onHeightChange={h => setSlotConfig(key, { minHeight: h })}
         >
           {renderPanelContent(slot.type, data, user, slot.config, u => setSlotConfig(key, u))}
         </Panel>
@@ -1696,20 +1766,9 @@ export default function Dashboard() {
           </div>
         ) : (() => {
           const numCols = columns as number
-          const removeRowIdx = (() => {
-            for (let r = rows - 1; r >= 0; r--) {
-              const keys = Array.from({ length: numCols }, (_, c) => String(r * numCols + c))
-              if (keys.every(k => !slots[k])) return r
-            }
-            return null
-          })()
           return (
-            <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
-              {Array.from({ length: numCols }, (_, colIdx) => (
-                <div key={colIdx} style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  {Array.from({ length: rows }, (_, rowIdx) => renderSlot(String(rowIdx * numCols + colIdx)))}
-                </div>
-              ))}
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: '14px', alignItems: 'start' }}>
+              {Array.from({ length: rows * numCols }, (_, i) => renderSlot(String(i)))}
             </div>
           )
         })()}
