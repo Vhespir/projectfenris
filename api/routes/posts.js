@@ -121,7 +121,7 @@ export async function postRoutes(app, { pool }) {
       return reply.code(400).send({ error: 'post_type, category, title, and body are required' })
     }
 
-    const validTypes = ['community', 'field_report', 'self_reported_news']
+    const validTypes = ['community', 'field_report', 'self_reported_news', 'pattern']
     if (!validTypes.includes(post_type)) {
       return reply.code(400).send({ error: 'Invalid post_type' })
     }
@@ -148,6 +148,7 @@ export async function postRoutes(app, { pool }) {
 
     const channelId = post_type === 'field_report' ? 'field'
       : post_type === 'self_reported_news' ? 'news'
+      : post_type === 'pattern' ? 'patterns'
       : (CATEGORY_TO_CHANNEL[category] ?? 'general')
     emitToChannel(channelId, 'new_post', rows[0])
     emitToChannel('all', 'new_post', rows[0])

@@ -30,6 +30,7 @@ interface Channel {
 
 const CHANNELS: Channel[] = [
   { id: 'all',       label: 'All Posts',             type: null,                 category: null },
+  { id: 'patterns',  label: 'Pattern Analysis',      type: 'pattern',            category: null },
   { id: 'field',     label: 'Field Reports',          type: 'field_report',       category: null },
   { id: 'news',      label: 'News Reports',           type: 'self_reported_news', category: null },
   { id: 'gear',      label: 'Gear and Equipment',     type: 'community',          category: 'Gear and Equipment' },
@@ -54,12 +55,16 @@ const TYPE_COLOR: Record<string, string> = {
   community:          'var(--color-info)',
   field_report:       'var(--color-warning)',
   self_reported_news: 'var(--color-accent)',
+  pattern:            '#F97316',
 }
 const TYPE_LABEL: Record<string, string> = {
   community:          'Community',
   field_report:       'Field Report',
   self_reported_news: 'News Report',
+  pattern:            'Pattern Analysis',
 }
+
+const PATTERN_VALIDATED_THRESHOLD = 5
 
 const SORTS = [
   { key: 'recent',        label: 'Recent' },
@@ -121,6 +126,15 @@ function PostCard({ post, currentUser }: { post: Post; currentUser: { id: number
         }}>
           {TYPE_LABEL[post.post_type] ?? post.post_type}
         </span>
+        {post.post_type === 'pattern' && upvotes >= PATTERN_VALIDATED_THRESHOLD && (
+          <span style={{
+            fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: '3px',
+            background: 'rgba(34,197,94,0.12)', color: 'var(--color-accent)', border: '1px solid rgba(34,197,94,0.3)',
+            textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700,
+          }}>
+            Validated
+          </span>
+        )}
         <span style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
           {post.category}
         </span>
@@ -424,7 +438,7 @@ export default function Community() {
               ) : (
                 <div>
                   <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '20px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '2px' }}>
-                    {channelId === 'subscribed' ? '★ Subscribed' : channel.id === 'all' ? '# ' : channel.type === 'field_report' ? '! ' : channel.type === 'self_reported_news' ? '~ ' : '# '}{channelId !== 'subscribed' && channel.label}
+                    {channelId === 'subscribed' ? '★ Subscribed' : channel.id === 'all' ? '# ' : channel.type === 'pattern' ? '◈ ' : channel.type === 'field_report' ? '! ' : channel.type === 'self_reported_news' ? '~ ' : '# '}{channelId !== 'subscribed' && channel.label}
                   </h1>
                   {loading ? null : (
                     <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>
@@ -470,13 +484,17 @@ export default function Community() {
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
                   <div>
                     <label style={labelStyle}>Type</label>
-                    <select value={form.post_type} onChange={e => setForm(f => ({ ...f, post_type: e.target.value, category: '' }))} style={inputStyle}>
+                    <select value={form.post_type} onChange={e => {
+                      const t = e.target.value
+                      setForm(f => ({ ...f, post_type: t, category: t === 'pattern' ? 'Pattern Analysis' : '' }))
+                    }} style={inputStyle}>
                       <option value="community">Community Post</option>
                       <option value="field_report">Field Report</option>
                       <option value="self_reported_news">News Report</option>
+                      <option value="pattern">Pattern Analysis</option>
                     </select>
                   </div>
-                  {form.post_type !== 'self_reported_news' && (
+                  {form.post_type !== 'self_reported_news' && form.post_type !== 'pattern' && (
                     <div>
                       <label style={labelStyle}>Category</label>
                       <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} required style={inputStyle}>
@@ -493,13 +511,26 @@ export default function Community() {
                 <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required placeholder="Clear, descriptive title" style={inputStyle} />
               </div>
 
+              {form.post_type === 'pattern' && (
+                <div style={{
+                  padding: '12px 14px', borderRadius: '6px',
+                  background: 'rgba(249,115,22,0.08)', border: '1px solid rgba(249,115,22,0.3)',
+                  fontFamily: 'var(--font-mono)', fontSize: '11px', color: '#F97316', lineHeight: 1.6,
+                }}>
+                  <div style={{ fontWeight: 700, letterSpacing: '0.08em', marginBottom: '4px' }}>PATTERN ANALYSIS</div>
+                  Connect the dots across multiple sources. Cite at least 2 references using #SLUG to link related events, news items, or reports. The community will signal whether the pattern holds.
+                </div>
+              )}
+
               <div>
                 <label style={labelStyle}>Body</label>
                 <MentionTextarea
                   value={form.body}
                   onChange={v => setForm(f => ({ ...f, body: v }))}
-                  rows={4}
-                  placeholder="Details, context, what you're seeing... Type @ to mention a user or # to cite an event/news item."
+                  rows={form.post_type === 'pattern' ? 6 : 4}
+                  placeholder={form.post_type === 'pattern'
+                    ? 'Describe the pattern you are observing. Cite your sources with #SLUG -- e.g. "I noticed #IRON-RIDGE and #PALE-CREEK both reported similar anomalies within 48 hours..."'
+                    : 'Details, context, what you are seeing... Type @ to mention a user or # to cite an event/news item.'}
                   style={{ ...inputStyle, resize: 'vertical' as const, width: '100%' }}
                 />
               </div>
