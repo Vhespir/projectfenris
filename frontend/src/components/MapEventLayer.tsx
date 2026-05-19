@@ -541,12 +541,14 @@ export interface DisasterEvent {
   event_type: string
   title: string
   severity: string
+  slug: string | null
   geometry: GeoJSON.Geometry | null
   properties: Record<string, unknown>
   external_id: string
   starts_at: string | null
   expires_at: string | null
   fetched_at: string
+  discussion_count?: number
 }
 
 export const SEVERITY_COLOR: Record<string, string> = {
@@ -647,9 +649,10 @@ export function EventLayer({ events, activeFilters, popups = true }: EventLayerP
               ${event.starts_at  ? `<br><span style="color:#52525B">Started ${formatTime(event.starts_at)}</span>` : ''}
             </div>
             ${p.areaDesc ? `<div style="font-size:11px;color:#71717A;margin-top:4px;border-top:1px solid #262626;padding-top:6px">${p.areaDesc}</div>` : ''}
-            <div style="margin-top:10px;border-top:1px solid #262626;padding-top:8px;display:flex;gap:12px">
-              <a href="/feed" style="font-size:12px;color:#22C55E;text-decoration:none;font-weight:600">View in Feed</a>
-              <a href="/community" style="font-size:12px;color:#71717A;text-decoration:none">Community</a>
+            <div style="margin-top:10px;border-top:1px solid #262626;padding-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              ${event.slug ? `<span style="font-family:monospace;font-size:10px;padding:2px 6px;border:1px solid #333;border-radius:4px;color:#71717A;letter-spacing:.06em">#${event.slug}</span>` : ''}
+              ${event.slug ? `<a href="/event/${event.slug}" style="font-size:11px;color:#22C55E;text-decoration:none;font-weight:600">${(event.discussion_count ?? 0) > 0 ? `${event.discussion_count} discussions` : 'Discuss'}</a>` : ''}
+              <a href="/feed" style="font-size:11px;color:#71717A;text-decoration:none;margin-left:auto">Feed</a>
             </div>
           </div>
         `)

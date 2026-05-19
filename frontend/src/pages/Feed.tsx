@@ -4,6 +4,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
 import { useSocket } from '../context/SocketContext'
 import { getTier } from '../utils/tier'
+import { useContextDrawer } from '../context/ContextDrawerContext'
 
 interface GeoJSON {
   type: string
@@ -16,10 +17,12 @@ interface EventItem {
   event_type: string
   title: string
   severity: string
+  slug: string | null
   fetched_at: string
   expires_at: string | null
   properties: Record<string, unknown>
   geometry: GeoJSON | null
+  discussion_count: number
 }
 
 const RADIUS_OPTIONS = [100, 250, 500, 1000]
@@ -59,7 +62,9 @@ interface NewsItem {
   summary: string | null
   category: string | null
   region: string | null
+  slug: string | null
   published_at: string | null
+  discussion_count: number
 }
 
 interface PostItem {
@@ -111,6 +116,30 @@ function timeAgo(iso: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+function CiteButton({ slug }: { slug: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={e => {
+        e.preventDefault(); e.stopPropagation()
+        navigator.clipboard.writeText(`#${slug}`).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }}
+      style={{
+        background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '4px',
+        color: copied ? 'var(--color-accent)' : 'var(--color-subtle)',
+        fontFamily: 'var(--font-mono)', fontSize: '10px', letterSpacing: '0.06em',
+        padding: '2px 7px', cursor: 'pointer', transition: 'color 0.15s, border-color 0.15s',
+        borderColor: copied ? 'rgba(34,197,94,0.4)' : 'var(--color-border)',
+      }}
+    >
+      {copied ? 'Copied!' : `#${slug}`}
+    </button>
+  )
+}
+
 function SourceBadge({ label, verified }: { label: string; verified: boolean }) {
   return (
     <span style={{
@@ -131,6 +160,7 @@ function SourceBadge({ label, verified }: { label: string; verified: boolean }) 
 function EventCard({ item }: { item: EventItem }) {
   const color = SEVERITY_COLOR[item.severity] ?? 'var(--color-muted)'
   const p = item.properties as Record<string, string>
+  const { open: openDrawer } = useContextDrawer()
 
   return (
     <div style={{
@@ -151,26 +181,36 @@ function EventCard({ item }: { item: EventItem }) {
         {item.title}
       </div>
       {p.areaDesc && (
-        <div style={{ fontSize: '12px', color: 'var(--color-muted)', marginBottom: '5px' }}>
+        <div style={{ fontSize: '12px', color: 'var(--color-muted)', marginBottom: '8px' }}>
           {p.areaDesc.length > 120 ? p.areaDesc.slice(0, 120) + '...' : p.areaDesc}
         </div>
       )}
-      <div style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
-        {timeAgo(item.fetched_at)}
-        {item.expires_at && ` · expires ${new Date(item.expires_at).toLocaleString()}`}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', flex: 1 }}>
+          {timeAgo(item.fetched_at)}
+          {item.expires_at && ` · expires ${new Date(item.expires_at).toLocaleString()}`}
+        </span>
+        {item.slug && (
+          <>
+            <CiteButton slug={item.slug} />
+            <button
+              onClick={e => { e.stopPropagation(); openDrawer(item.slug!) }}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', padding: 0 }}
+            >
+              {item.discussion_count > 0 ? `${item.discussion_count} discussion${item.discussion_count !== 1 ? 's' : ''}` : 'Discuss'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   )
 }
 
 function NewsCard({ item }: { item: NewsItem }) {
+  const { open: openDrawer } = useContextDrawer()
   return (
-    <a href={item.url ?? '#'} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', display: 'block' }}>
-      <div
-        style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '14px 18px', transition: 'border-color 0.15s' }}
-        onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--color-accent)')}
-        onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--color-border)')}
-      >
+    <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px', padding: '14px 18px' }}>
+      <a href={item.url ?? '#'} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', display: 'block' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '7px', flexWrap: 'wrap' }}>
           <SourceBadge label={item.source} verified={true} />
           {item.category && (
@@ -189,12 +229,23 @@ function NewsCard({ item }: { item: NewsItem }) {
           {item.title}
         </div>
         {item.summary && (
-          <div style={{ fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.5 }}>
+          <div style={{ fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.5, marginBottom: '8px' }}>
             {item.summary.length > 160 ? item.summary.slice(0, 160) + '...' : item.summary}
           </div>
         )}
-      </div>
-    </a>
+      </a>
+      {item.slug && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
+          <CiteButton slug={item.slug} />
+          <button
+            onClick={() => openDrawer(item.slug!)}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', padding: 0 }}
+          >
+            {item.discussion_count > 0 ? `${item.discussion_count} discussion${item.discussion_count !== 1 ? 's' : ''}` : 'Discuss'}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 

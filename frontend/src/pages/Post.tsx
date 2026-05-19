@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getTier } from '../utils/tier'
+import { PostBody } from '../components/PostBody'
+import { MentionTextarea } from '../components/MentionTextarea'
 
 interface Post {
   id: number
@@ -246,12 +248,11 @@ export default function PostPage() {
               style={{ ...textareaStyle, resize: 'none', fontSize: '18px', fontFamily: 'var(--font-display)', fontWeight: 700 }}
               required
             />
-            <textarea
+            <MentionTextarea
               value={editBody}
-              onChange={e => setEditBody(e.target.value)}
+              onChange={setEditBody}
               rows={8}
-              style={{ ...textareaStyle, resize: 'vertical' }}
-              required
+              style={{ ...textareaStyle, resize: 'vertical', width: '100%' }}
             />
             <div style={{ display: 'flex', gap: '8px' }}>
               <button type="submit" disabled={savingPost} style={{ padding: '7px 16px', borderRadius: '6px', border: 'none', cursor: savingPost ? 'not-allowed' : 'pointer', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600 }}>
@@ -267,8 +268,8 @@ export default function PostPage() {
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '22px', fontWeight: 700, marginBottom: '16px', lineHeight: 1.3 }}>
               {post.title}
             </h1>
-            <div style={{ fontSize: '15px', color: 'var(--color-text)', lineHeight: 1.7, fontFamily: 'var(--font-body)', whiteSpace: 'pre-wrap', marginBottom: '24px' }}>
-              {post.body}
+            <div style={{ marginBottom: '24px' }}>
+              <PostBody text={post.body} />
             </div>
           </>
         )}

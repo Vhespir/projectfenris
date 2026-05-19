@@ -23,6 +23,21 @@ const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gi
 const MAX_SIZE = 2 * 1024 * 1024 // 2 MB
 
 export async function userRoutes(app, { pool }) {
+  // Username autocomplete for @mention in post editor
+  app.get('/users/autocomplete', async (req, reply) => {
+    const q = String(req.query.q ?? '').trim()
+    if (!q) return []
+    const { rows } = await pool.query(
+      `SELECT username, avatar_url, is_trusted
+       FROM users
+       WHERE username ILIKE $1
+       ORDER BY (username ILIKE $2) DESC, username ASC
+       LIMIT 8`,
+      [`${q}%`, q]
+    )
+    return rows
+  })
+
   app.get('/users/:username', async (req, reply) => {
     const { rows } = await pool.query(
       `SELECT id, username, reputation, is_trusted, is_moderator,

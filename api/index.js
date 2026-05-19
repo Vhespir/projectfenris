@@ -22,6 +22,7 @@ import { externalRoutes } from './routes/external.js'
 import { aarRoutes } from './routes/aar.js'
 import { frequencyRoutes } from './routes/frequencies.js'
 import { inventoryRoutes } from './routes/inventory.js'
+import { refRoutes } from './routes/refs.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
 
@@ -120,9 +121,11 @@ app.get('/proxy/opensky', async (req, reply) => {
 app.get('/events', async (req) => {
   const { source, sources, severity, limit = 2000, days } = req.query
   let query = `
-    SELECT id, source, event_type, title, severity,
+    SELECT id, source, event_type, title, severity, slug,
            ST_AsGeoJSON(geometry)::json AS geometry,
-           properties, external_id, starts_at, expires_at, fetched_at
+           properties, external_id, starts_at, expires_at, fetched_at,
+           (SELECT COUNT(*)::int FROM content_references
+            WHERE target_type = 'event' AND target_id = disaster_events.id) AS discussion_count
     FROM disaster_events
     WHERE (expires_at IS NULL OR expires_at > NOW())
   `
@@ -146,7 +149,10 @@ app.get('/events', async (req) => {
 
 app.get('/news', async (req) => {
   const { limit = 50, category, source, days } = req.query
-  let query = `SELECT id, source, title, url, summary, category, region, published_at FROM news_items WHERE 1=1`
+  let query = `SELECT id, source, title, url, summary, category, region, slug, published_at,
+    (SELECT COUNT(*)::int FROM content_references
+     WHERE target_type = 'news' AND target_id = news_items.id) AS discussion_count
+   FROM news_items WHERE 1=1`
   const params = []
   if (category) {
     const cats = String(category).split(',').map(c => c.trim()).filter(Boolean)
@@ -362,6 +368,7 @@ await app.register(externalRoutes)
 await app.register(aarRoutes, { pool })
 await app.register(frequencyRoutes, { pool })
 await app.register(inventoryRoutes, { pool })
+await app.register(refRoutes, { pool })
 
 try {
   await runMigrations(process.env.DATABASE_URL)

@@ -24,7 +24,10 @@ import ResetPassword from './pages/ResetPassword'
 import Inbox from './pages/Inbox'
 import AfterAction, { AARDetail } from './pages/AfterAction'
 import Frequencies from './pages/Frequencies'
+import EventThread from './pages/EventThread'
 import { SocketProvider } from './context/SocketContext'
+import { ContextDrawerProvider } from './context/ContextDrawerContext'
+import { ContextDrawer } from './components/ContextDrawer'
 
 function ProfileRedirect() {
   const { user } = useAuth()
@@ -35,6 +38,7 @@ function ProfileRedirect() {
 function App() {
   return (
     <SocketProvider>
+    <ContextDrawerProvider>
     <div className="app">
       <Navbar />
       <main>
@@ -63,6 +67,7 @@ function App() {
           <Route path="/aar" element={<AfterAction />} />
           <Route path="/aar/:id" element={<AARDetail />} />
           <Route path="/frequencies" element={<Frequencies />} />
+          <Route path="/event/:slug" element={<EventThread />} />
           <Route path="/500" element={<ServerError />} />
           <Route path="/403" element={<Forbidden />} />
           <Route path="/503" element={<Maintenance />} />
@@ -70,7 +75,9 @@ function App() {
         </Routes>
       </main>
       <Footer />
+      <ContextDrawer />
     </div>
+    </ContextDrawerProvider>
     </SocketProvider>
   )
 }

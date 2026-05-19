@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useSearchParams, Link, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 
-type ResultType = 'all' | 'posts' | 'guides' | 'events' | 'news'
+type ResultType = 'all' | 'users' | 'posts' | 'guides' | 'events' | 'news'
 
 interface PostResult {
   id: number
@@ -48,8 +48,19 @@ interface NewsResult {
   published_at: string
 }
 
+interface UserResult {
+  id: number
+  username: string
+  avatar_url: string | null
+  bio: string | null
+  prep_level: string | null
+  is_trusted: boolean
+  created_at: string
+}
+
 interface SearchResults {
   query: string
+  users: UserResult[]
   posts: PostResult[]
   guides: GuideResult[]
   events: EventResult[]
@@ -136,7 +147,8 @@ export default function Search() {
   }
 
   const tabs: { id: ResultType; label: string; count: number }[] = results ? [
-    { id: 'all',    label: 'All',    count: results.posts.length + results.guides.length + results.events.length + results.news.length },
+    { id: 'all',    label: 'All',    count: results.users.length + results.posts.length + results.guides.length + results.events.length + results.news.length },
+    { id: 'users',  label: 'Users',  count: results.users.length },
     { id: 'posts',  label: 'Posts',  count: results.posts.length },
     { id: 'guides', label: 'Guides', count: results.guides.length },
     { id: 'events', label: 'Events', count: results.events.length },
@@ -144,7 +156,7 @@ export default function Search() {
   ] : []
 
   const totalCount = results
-    ? results.posts.length + results.guides.length + results.events.length + results.news.length
+    ? results.users.length + results.posts.length + results.guides.length + results.events.length + results.news.length
     : 0
 
   return (
@@ -166,7 +178,7 @@ export default function Search() {
               type="text"
               value={inputVal}
               onChange={e => setInputVal(e.target.value)}
-              placeholder="Search posts, guides, events, news..."
+              placeholder="Search users, posts, guides, events, news..."
               style={{
                 width: '100%', padding: '13px 14px 13px 42px',
                 background: 'var(--color-surface)', border: '1px solid var(--color-border)',
@@ -233,6 +245,52 @@ export default function Search() {
               </div>
             ) : (
               <>
+                {/* Users */}
+                {(activeTab === 'all' || activeTab === 'users') && results.users.length > 0 && (
+                  <>
+                    <SectionLabel label="Users" count={results.users.length} />
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {results.users.map(u => (
+                        <Link key={u.id} to={`/profile/${u.username}`} style={{ display: 'block', textDecoration: 'none' }}>
+                          <div style={{
+                            padding: '12px 16px', background: 'var(--color-surface)',
+                            border: '1px solid var(--color-border)', borderRadius: '8px',
+                            display: 'flex', alignItems: 'center', gap: '14px',
+                          }}>
+                            <div style={{
+                              width: '42px', height: '42px', borderRadius: '50%', flexShrink: 0,
+                              background: u.avatar_url ? 'transparent' : 'var(--color-surface-elevated)',
+                              border: '1px solid var(--color-border)',
+                              overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {u.avatar_url
+                                ? <img src={u.avatar_url} alt={u.username} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                : <span style={{ fontFamily: 'var(--font-mono)', fontSize: '16px', fontWeight: 700, color: 'var(--color-muted)' }}>{u.username[0].toUpperCase()}</span>
+                              }
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                                <span style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>{u.username}</span>
+                                {u.is_trusted && (
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-accent)', border: '1px solid rgba(34,197,94,0.3)', borderRadius: '3px', padding: '1px 5px', letterSpacing: '0.06em' }}>TRUSTED</span>
+                                )}
+                                {u.prep_level && (
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', border: '1px solid var(--color-border)', borderRadius: '3px', padding: '1px 5px', letterSpacing: '0.06em', textTransform: 'uppercase' }}>{u.prep_level}</span>
+                                )}
+                              </div>
+                              {u.bio && (
+                                <div style={{ fontSize: '12px', color: 'var(--color-muted)', lineHeight: 1.4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {u.bio}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </Link>
+                      ))}
+                    </div>
+                  </>
+                )}
+
                 {/* Posts */}
                 {(activeTab === 'all' || activeTab === 'posts') && results.posts.length > 0 && (
                   <>
@@ -373,7 +431,7 @@ export default function Search() {
             marginTop: '80px', textAlign: 'center',
             fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--color-subtle)', lineHeight: 2,
           }}>
-            Search across community posts, guides, live events, and news.
+            Search across users, community posts, guides, live events, and news.
           </div>
         )}
       </div>

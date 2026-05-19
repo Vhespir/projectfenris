@@ -12,7 +12,7 @@ export async function searchRoutes(app, { pool }) {
 
     if (!tsq) return reply.code(400).send({ error: 'Invalid query' })
 
-    const [postsRes, guidesRes, eventsRes, newsRes] = await Promise.allSettled([
+    const [postsRes, guidesRes, eventsRes, newsRes, usersRes] = await Promise.allSettled([
       pool.query(`
         SELECT
           p.id, 'post' AS type, p.post_type, p.category, p.title,
@@ -70,6 +70,16 @@ export async function searchRoutes(app, { pool }) {
         ORDER BY rank DESC, n.published_at DESC NULLS LAST
         LIMIT 10
       `, [tsq]),
+
+      pool.query(`
+        SELECT id, username, avatar_url, bio, prep_level, is_trusted, created_at
+        FROM users
+        WHERE username ILIKE $1 OR bio ILIKE $1
+        ORDER BY
+          CASE WHEN username ILIKE $2 THEN 0 ELSE 1 END,
+          username ASC
+        LIMIT 8
+      `, [`%${q}%`, `${q}%`]),
     ])
 
     return {
@@ -78,6 +88,7 @@ export async function searchRoutes(app, { pool }) {
       guides: guidesRes.status === 'fulfilled' ? guidesRes.value.rows : [],
       events: eventsRes.status === 'fulfilled' ? eventsRes.value.rows : [],
       news:   newsRes.status   === 'fulfilled' ? newsRes.value.rows   : [],
+      users:  usersRes.status  === 'fulfilled' ? usersRes.value.rows  : [],
     }
   })
 }

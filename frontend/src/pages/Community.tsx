@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { getTier } from '../utils/tier'
 import { useSocket } from '../context/SocketContext'
+import { MentionTextarea } from '../components/MentionTextarea'
 
 interface Post {
   id: number
@@ -186,7 +187,8 @@ export default function Community() {
   const [loading, setLoading] = useState(true)
   const [sort, setSort] = useState<Sort>('recent')
   const [search, setSearch] = useState('')
-  const [showForm, setShowForm] = useState(false)
+  const citeSlug = searchParams.get('cite')
+  const [showForm, setShowForm] = useState(!!citeSlug)
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [locating, setLocating] = useState(false)
@@ -206,7 +208,7 @@ export default function Community() {
     post_type: defaultType,
     category: defaultCategory,
     title: '',
-    body: '',
+    body: citeSlug ? `#${citeSlug} ` : '',
     location_label: '',
     latitude: '',
     longitude: '',
@@ -493,8 +495,13 @@ export default function Community() {
 
               <div>
                 <label style={labelStyle}>Body</label>
-                <textarea value={form.body} onChange={e => setForm(f => ({ ...f, body: e.target.value }))} required rows={4}
-                  placeholder="Details, context, what you're seeing..." style={{ ...inputStyle, resize: 'vertical' as const }} />
+                <MentionTextarea
+                  value={form.body}
+                  onChange={v => setForm(f => ({ ...f, body: v }))}
+                  rows={4}
+                  placeholder="Details, context, what you're seeing... Type @ to mention a user or # to cite an event/news item."
+                  style={{ ...inputStyle, resize: 'vertical' as const, width: '100%' }}
+                />
               </div>
 
               <div>

@@ -5,6 +5,7 @@ import 'leaflet/dist/leaflet.css'
 import { EventLayer, RadarLayer, WeatherAlertLayer, type DisasterEvent } from '../components/MapEventLayer'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { useContextDrawer } from '../context/ContextDrawerContext'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -230,6 +231,7 @@ function EmptySlot({ editMode, onClick, isMoveTarget }: { editMode: boolean; onC
 // ─── Widget: Active Alerts ────────────────────────────────────────────────────
 
 function AlertsContent({ data }: { data: DashData }) {
+  const { open: openDrawer } = useContextDrawer()
   const pinned = data.events
     .filter(e => e.severity === 'Extreme' || e.severity === 'Severe')
     .sort((a, b) => (a.severity === 'Extreme' ? 0 : 1) - (b.severity === 'Extreme' ? 0 : 1))
@@ -252,8 +254,15 @@ function AlertsContent({ data }: { data: DashData }) {
           <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: 'var(--color-surface)', borderLeft: `3px solid ${color}` }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>{e.severity}</span>
             <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</span>
-            {p.areaDesc && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0, maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.areaDesc.split(';')[0]}</span>}
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{e.source?.toUpperCase()}</span>
+            {p.areaDesc && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.areaDesc.split(';')[0]}</span>}
+            {e.slug && (
+              <button
+                onClick={ev => { ev.stopPropagation(); openDrawer(e.slug!) }}
+                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.06em', flexShrink: 0, padding: 0 }}
+              >
+                #{e.slug}
+              </button>
+            )}
           </div>
         )
       })}

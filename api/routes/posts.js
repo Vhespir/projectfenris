@@ -1,4 +1,4 @@
-import { emitToChannel } from '../lib/socket.js'
+import { emitToChannel, emitToUser } from '../lib/socket.js'
 
 const CATEGORY_TO_CHANNEL = {
   'Gear and Equipment': 'gear',
@@ -27,9 +27,9 @@ const CHANNEL_FILTER_MAP = {
 }
 
 export async function postRoutes(app, { pool }) {
-  // List posts
+  // List posts (supports ?ref=SLUG to filter by cited event/news)
   app.get('/posts', async (req) => {
-    const { type, category, channels, sort = 'recent', limit = 50, offset = 0 } = req.query
+    const { type, category, channels, sort = 'recent', limit = 50, offset = 0, ref } = req.query
     let query = `
       SELECT p.id, p.post_type, p.category, p.title, p.body,
              p.location_label, p.latitude, p.longitude,
@@ -41,6 +41,22 @@ export async function postRoutes(app, { pool }) {
       WHERE p.is_removed = FALSE
     `
     const params = []
+
+    // Filter to posts that cited a specific event/news slug
+    if (ref) {
+      const slug = String(ref).toUpperCase().trim()
+      query += `
+        AND p.id IN (
+          SELECT cr.source_id FROM content_references cr
+          JOIN disaster_events de ON de.id = cr.target_id AND cr.target_type = 'event' AND de.slug = $${params.length + 1}
+          UNION
+          SELECT cr.source_id FROM content_references cr
+          JOIN news_items ni ON ni.id = cr.target_id AND cr.target_type = 'news' AND ni.slug = $${params.length + 1}
+        )
+      `
+      params.push(slug)
+    }
+
     if (channels) {
       const channelList = String(channels).split(',').map(s => s.trim()).filter(s => CHANNEL_FILTER_MAP[s])
       if (channelList.length > 0) {
@@ -135,6 +151,57 @@ export async function postRoutes(app, { pool }) {
       : (CATEGORY_TO_CHANNEL[category] ?? 'general')
     emitToChannel(channelId, 'new_post', rows[0])
     emitToChannel('all', 'new_post', rows[0])
+
+    const postId = rows[0].id
+    const bodyText = body.trim()
+
+    // Process @mentions and #slug references asynchronously
+    Promise.resolve().then(async () => {
+      const mentionPattern = /@([a-zA-Z0-9_]+)/g
+      const refPattern = /#([A-Z]+-[A-Z]+(?:-\d+)?)/gi
+      const mentions = [...bodyText.matchAll(mentionPattern)].map(m => m[1])
+      const slugRefs = [...new Set([...bodyText.matchAll(refPattern)].map(m => m[1].toUpperCase()))]
+
+      // @mention notifications
+      for (const username of [...new Set(mentions)]) {
+        try {
+          const uRes = await pool.query('SELECT id FROM users WHERE username = $1', [username])
+          if (!uRes.rows.length) continue
+          const mentionedId = uRes.rows[0].id
+          if (mentionedId === req.user.id) continue
+          const msg = `@${req.user.username} mentioned you in a post`
+          await pool.query(
+            `INSERT INTO notifications (user_id, type, message, link) VALUES ($1, 'mention', $2, $3)
+             ON CONFLICT DO NOTHING`,
+            [mentionedId, msg, `/post/${postId}`]
+          )
+          emitToUser(mentionedId, 'notification', { message: msg, link: `/post/${postId}` })
+        } catch {}
+      }
+
+      // #slug content references
+      for (const slug of slugRefs) {
+        try {
+          const evRes = await pool.query('SELECT id FROM disaster_events WHERE slug = $1', [slug])
+          if (evRes.rows.length) {
+            await pool.query(
+              `INSERT INTO content_references (source_type, source_id, target_type, target_id)
+               VALUES ('post', $1, 'event', $2) ON CONFLICT DO NOTHING`,
+              [postId, evRes.rows[0].id]
+            )
+            continue
+          }
+          const nwRes = await pool.query('SELECT id FROM news_items WHERE slug = $1', [slug])
+          if (nwRes.rows.length) {
+            await pool.query(
+              `INSERT INTO content_references (source_type, source_id, target_type, target_id)
+               VALUES ('post', $1, 'news', $2) ON CONFLICT DO NOTHING`,
+              [postId, nwRes.rows[0].id]
+            )
+          }
+        } catch {}
+      }
+    }).catch(() => {})
 
     return reply.code(201).send(rows[0])
   })
