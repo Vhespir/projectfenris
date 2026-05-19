@@ -1,3 +1,5 @@
+import { generateSlug } from '../lib/slugs.js'
+
 const VALID_TYPES = [
   'hurricane', 'earthquake', 'wildfire', 'flood', 'tornado', 'winter_storm',
   'power_outage', 'medical', 'financial', 'civil_unrest', 'evacuation', 'other',
@@ -83,15 +85,15 @@ export async function aarRoutes(app, { pool }) {
     const { rows } = await pool.query(`
       INSERT INTO after_action_reports
         (user_id, title, incident_type, location_label, state, duration,
-         narrative, what_worked, what_failed, wish_had, key_takeaway)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+         narrative, what_worked, what_failed, wish_had, key_takeaway, slug)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       RETURNING id, title, incident_type, location_label, state, duration,
                 key_takeaway, signal_count, created_at
     `, [
       req.user.id, title.trim(), incident_type,
       location_label?.trim() || null, state?.trim() || null, duration?.trim() || null,
       narrative.trim(), clean(what_worked), clean(what_failed), clean(wish_had),
-      key_takeaway?.trim() || null,
+      key_takeaway?.trim() || null, generateSlug(),
     ])
     return reply.code(201).send(rows[0])
   })

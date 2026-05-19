@@ -21,7 +21,8 @@
     "pg": "^8.20.0",
     "qrcode": "^1.5.4",
     "resend": "^6.12.3",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "unique-names-generator": "^4.7.1"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0"

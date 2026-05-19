@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -43,20 +44,21 @@ async function fetchCountry(country) {
 }
 
 async function storeAlert(source, eventType, title, severity, geomJson, properties, externalId, startsAt, expiresAt) {
+  const slug = generateSlug()
   if (geomJson) {
     return pool.query(`
       INSERT INTO disaster_events
-        (source, event_type, title, severity, geometry, properties, external_id, starts_at, expires_at)
-      VALUES ($1, $2, $3, $4, ST_GeomFromGeoJSON($5), $6, $7, $8, $9)
+        (source, event_type, title, severity, geometry, properties, external_id, starts_at, expires_at, slug)
+      VALUES ($1, $2, $3, $4, ST_GeomFromGeoJSON($5), $6, $7, $8, $9, $10)
       ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
-    `, [source, eventType, title, severity, geomJson, properties, externalId, startsAt, expiresAt])
+    `, [source, eventType, title, severity, geomJson, properties, externalId, startsAt, expiresAt, slug])
   } else {
     return pool.query(`
       INSERT INTO disaster_events
-        (source, event_type, title, severity, geometry, properties, external_id, starts_at, expires_at)
-      VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8)
+        (source, event_type, title, severity, geometry, properties, external_id, starts_at, expires_at, slug)
+      VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8, $9)
       ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
-    `, [source, eventType, title, severity, properties, externalId, startsAt, expiresAt])
+    `, [source, eventType, title, severity, properties, externalId, startsAt, expiresAt, slug])
   }
 }
 

@@ -194,7 +194,7 @@ function EventCard({ item }: { item: EventItem }) {
           <>
             <CiteButton slug={item.slug} />
             <button
-              onClick={e => { e.stopPropagation(); openDrawer(item.slug!) }}
+              onClick={e => { e.stopPropagation(); openDrawer(item.slug!, 'event') }}
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', padding: 0 }}
             >
               {item.discussion_count > 0 ? `${item.discussion_count} discussion${item.discussion_count !== 1 ? 's' : ''}` : 'Discuss'}
@@ -238,7 +238,7 @@ function NewsCard({ item }: { item: NewsItem }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', paddingTop: '8px', borderTop: '1px solid var(--color-border)' }}>
           <CiteButton slug={item.slug} />
           <button
-            onClick={() => openDrawer(item.slug!)}
+            onClick={() => openDrawer(item.slug!, 'news')}
             style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', padding: 0 }}
           >
             {item.discussion_count > 0 ? `${item.discussion_count} discussion${item.discussion_count !== 1 ? 's' : ''}` : 'Discuss'}

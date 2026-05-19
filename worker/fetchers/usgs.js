@@ -1,5 +1,6 @@
 import axios from 'axios'
 import pg from 'pg'
+import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -26,8 +27,8 @@ export async function fetchUSGS() {
       const { rowCount } = await pool.query(`
         INSERT INTO disaster_events
           (source, event_type, title, severity, geometry, properties,
-           external_id, starts_at)
-        VALUES ($1, $2, $3, $4, ST_Force2D(ST_GeomFromGeoJSON($5)), $6, $7, $8)
+           external_id, starts_at, slug)
+        VALUES ($1, $2, $3, $4, ST_Force2D(ST_GeomFromGeoJSON($5)), $6, $7, $8, $9)
         ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
       `, [
         'usgs',
@@ -38,6 +39,7 @@ export async function fetchUSGS() {
         JSON.stringify(p),
         quake.id,
         p.time ? new Date(p.time).toISOString() : null,
+        generateSlug(),
       ])
 
       stored += rowCount

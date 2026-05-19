@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -57,8 +58,8 @@ export async function fetchGDACS() {
 
       const { rowCount } = await pool.query(`
         INSERT INTO disaster_events
-          (source, event_type, title, severity, geometry, properties, external_id, starts_at, expires_at)
-        VALUES ($1, $2, $3, $4, ${geom}, $5, $6, $7, NOW() + INTERVAL '7 days')
+          (source, event_type, title, severity, geometry, properties, external_id, starts_at, expires_at, slug)
+        VALUES ($1, $2, $3, $4, ${geom}, $5, $6, $7, NOW() + INTERVAL '7 days', $8)
         ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL
         DO UPDATE SET expires_at = NOW() + INTERVAL '7 days', fetched_at = NOW()
       `, [
@@ -71,6 +72,7 @@ export async function fetchGDACS() {
         }),
         externalId,
         parseDotNetDate(p.fromdate ?? p.FromDate),
+        generateSlug(),
       ])
 
       stored += rowCount

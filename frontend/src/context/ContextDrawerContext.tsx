@@ -2,11 +2,13 @@ import { createContext, useContext, useState, useCallback, ReactNode } from 'rea
 
 interface DrawerState {
   slug: string | null
+  type?: string
 }
 
 interface ContextDrawerCtx {
   slug: string | null
-  open: (slug: string) => void
+  type?: string
+  open: (slug: string, type?: string) => void
   close: () => void
 }
 
@@ -19,11 +21,11 @@ const ContextDrawerContext = createContext<ContextDrawerCtx>({
 export function ContextDrawerProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DrawerState>({ slug: null })
 
-  const open = useCallback((slug: string) => setState({ slug }), [])
-  const close = useCallback(() => setState({ slug: null }), [])
+  const open = useCallback((slug: string, type?: string) => setState({ slug, type }), [])
+  const close = useCallback(() => setState({ slug: null, type: undefined }), [])
 
   return (
-    <ContextDrawerContext.Provider value={{ slug: state.slug, open, close }}>
+    <ContextDrawerContext.Provider value={{ slug: state.slug, type: state.type, open, close }}>
       {children}
     </ContextDrawerContext.Provider>
   )

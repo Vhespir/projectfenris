@@ -47,7 +47,7 @@ function timeAgo(iso: string) {
 }
 
 export function ContextDrawer() {
-  const { slug, close } = useContextDrawer()
+  const { slug, type, close } = useContextDrawer()
   const isMobile = useIsMobile()
   const [item, setItem] = useState<RefData | null>(null)
   const [posts, setPosts] = useState<ThreadPost[]>([])
@@ -57,8 +57,9 @@ export function ContextDrawer() {
   useEffect(() => {
     if (!slug) { setItem(null); setPosts([]); return }
     setLoading(true)
+    const lookupUrl = `/api/refs/lookup?slug=${encodeURIComponent(slug)}${type ? `&type=${encodeURIComponent(type)}` : ''}`
     Promise.all([
-      fetch(`/api/refs/lookup?slug=${encodeURIComponent(slug)}`, { credentials: 'include' }),
+      fetch(lookupUrl, { credentials: 'include' }),
       fetch(`/api/posts?ref=${encodeURIComponent(slug)}&sort=recent&limit=20`, { credentials: 'include' }),
     ]).then(async ([refRes, postsRes]) => {
       if (!refRes.ok) { setLoading(false); return }
@@ -67,7 +68,7 @@ export function ContextDrawer() {
       setPosts(Array.isArray(postsData) ? postsData : [])
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [slug])
+  }, [slug, type])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close() }

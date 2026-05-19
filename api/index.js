@@ -23,6 +23,7 @@ import { aarRoutes } from './routes/aar.js'
 import { frequencyRoutes } from './routes/frequencies.js'
 import { inventoryRoutes } from './routes/inventory.js'
 import { refRoutes } from './routes/refs.js'
+import { generateSlug } from './lib/slugs.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
 
@@ -320,9 +321,9 @@ app.post('/guides', { onRequest: [app.authenticate] }, async (req, reply) => {
     return reply.code(400).send({ error: 'title, body, and category are required' })
   }
   const { rows } = await pool.query(`
-    INSERT INTO guides (user_id, title, body, category, region)
-    VALUES ($1, $2, $3, $4, $5) RETURNING id
-  `, [req.user.id, title.trim(), body.trim(), category.trim(), region?.trim() || null])
+    INSERT INTO guides (user_id, title, body, category, region, slug)
+    VALUES ($1, $2, $3, $4, $5, $6) RETURNING id
+  `, [req.user.id, title.trim(), body.trim(), category.trim(), region?.trim() || null, generateSlug()])
   return reply.code(201).send({ id: rows[0].id })
 })
 

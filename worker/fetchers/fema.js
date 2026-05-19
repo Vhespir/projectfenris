@@ -1,5 +1,6 @@
 import axios from 'axios'
 import pg from 'pg'
+import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -19,8 +20,8 @@ export async function fetchFEMA() {
       const { rowCount } = await pool.query(`
         INSERT INTO disaster_events
           (source, event_type, title, severity, geometry, properties,
-           external_id, starts_at)
-        VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
+           external_id, starts_at, slug)
+        VALUES ($1, $2, $3, $4, NULL, $5, $6, $7, $8)
         ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
       `, [
         'fema',
@@ -30,6 +31,7 @@ export async function fetchFEMA() {
         JSON.stringify(d),
         externalId,
         d.declarationDate || null,
+        generateSlug(),
       ])
 
       stored += rowCount

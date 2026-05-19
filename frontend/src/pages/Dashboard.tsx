@@ -257,7 +257,7 @@ function AlertsContent({ data }: { data: DashData }) {
             {p.areaDesc && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.areaDesc.split(';')[0]}</span>}
             {e.slug && (
               <button
-                onClick={ev => { ev.stopPropagation(); openDrawer(e.slug!) }}
+                onClick={ev => { ev.stopPropagation(); openDrawer(e.slug!, 'event') }}
                 style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.06em', flexShrink: 0, padding: 0 }}
               >
                 #{e.slug}

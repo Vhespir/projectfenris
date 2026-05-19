@@ -1,4 +1,5 @@
 import pg from 'pg'
+import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -84,8 +85,8 @@ export async function fetchSWPC() {
       const url = `https://services.swpc.noaa.gov/alerts/${alert.product_id}`
 
       const { rowCount } = await pool.query(`
-        INSERT INTO news_items (source, title, url, summary, category, region, published_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO news_items (source, title, url, summary, category, region, published_at, slug)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (url) WHERE url IS NOT NULL DO NOTHING
       `, [
         'NOAA SWPC',
@@ -95,6 +96,7 @@ export async function fetchSWPC() {
         'space_weather',
         null,
         issuedAt ? issuedAt.toISOString() : null,
+        generateSlug(),
       ])
       stored += rowCount
     }
