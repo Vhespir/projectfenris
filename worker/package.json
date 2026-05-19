@@ -12,7 +12,6 @@
     "node-cron": "^4.2.1",
     "pg": "^8.20.0",
     "resend": "^6.12.3",
-    "rss-parser": "^3.13.0",
-    "unique-names-generator": "^4.7.1"
+    "rss-parser": "^3.13.0"
   }
 }
