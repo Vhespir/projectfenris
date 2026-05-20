@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import CesiumMap from '../components/CesiumMap'
 import type { DisasterEvent, AirTrafficFilters, AltitudeBand, FireTimeRange } from '../components/MapEventLayer'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -39,8 +40,42 @@ const ALT_LEGEND = [
   { color: '#EF4444', label: 'Emergency squawk' },
 ]
 
+const LEGEND_SOURCES = [
+  { shape: 'circle',   color: '#22C55E', label: 'NOAA' },
+  { shape: 'triangle', color: '#F59E0B', label: 'USGS Seismic' },
+  { shape: 'pentagon', color: '#3B82F6', label: 'GDACS Global' },
+  { shape: 'diamond',  color: '#A78BFA', label: 'EPA Air Quality' },
+  { shape: 'square',   color: '#F59E0B', label: 'Field Report' },
+]
+
+const LEGEND_SEVERITY = [
+  { color: '#EF4444', label: 'Extreme' },
+  { color: '#F59E0B', label: 'Severe' },
+  { color: '#3B82F6', label: 'Moderate' },
+  { color: '#22C55E', label: 'Minor' },
+]
+
+function LegendShape({ shape, color }: { shape: string; color: string }) {
+  const s = 14
+  const shapes: Record<string, JSX.Element> = {
+    circle:   <circle cx="7" cy="7" r="5.5" fill={color} />,
+    triangle: <polygon points="7,1 13,13 1,13" fill={color} />,
+    pentagon: <polygon points="7,1 13,5 11,12 3,12 1,5" fill={color} />,
+    diamond:  <polygon points="7,1 13,7 7,13 1,7" fill={color} />,
+    square:   <rect x="1.5" y="1.5" width="11" height="11" fill={color} />,
+  }
+  return (
+    <svg width={s} height={s} viewBox="0 0 14 14" style={{ flexShrink: 0 }}>
+      {shapes[shape] ?? shapes.circle}
+    </svg>
+  )
+}
+
 export default function MapPage() {
   const isMobile = useIsMobile()
+  const location = useLocation()
+  const pendingFlyTo = (location.state as { flyTo?: { lat: number; lon: number } } | null)?.flyTo
+
   const [events, setEvents] = useState<DisasterEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -53,6 +88,8 @@ export default function MapPage() {
 
   const [fireRange, setFireRange] = useState<FireTimeRange>('24h')
   const [firePanelOpen, setFirePanelOpen] = useState(false)
+  const [legendOpen, setLegendOpen] = useState(false)
+  const [measureMode, setMeasureMode] = useState(false)
 
   const flyToRef = useRef<((lat: number, lon: number) => void) | null>(null)
 
@@ -151,10 +188,26 @@ export default function MapPage() {
           </button>
         ))}
 
-        <div style={{ marginLeft: 'auto', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--color-muted)', flexShrink: 0 }}>
-          {loading ? 'Loading...' : error
-            ? <span style={{ color: 'var(--color-danger)' }}>{error}</span>
-            : `${events.length} active events`}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <button
+            onClick={() => setMeasureMode(v => !v)}
+            style={btn(measureMode, '#A78BFA')}
+            title="Measure distance between two points"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+              <line x1="2" y1="14" x2="14" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="2" y1="14" x2="5" y2="14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="2" y1="14" x2="2" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="14" y1="2" x2="11" y2="2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="14" y1="2" x2="14" y2="5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Measure
+          </button>
+          <span style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--color-muted)' }}>
+            {loading ? 'Loading...' : error
+              ? <span style={{ color: 'var(--color-danger)' }}>{error}</span>
+              : `${events.length} active events`}
+          </span>
         </div>
       </div>
 
@@ -168,7 +221,68 @@ export default function MapPage() {
           onAtCount={setAtCount}
           fireRange={fireRange}
           flyToRef={flyToRef}
+          initialFlyTo={pendingFlyTo}
+          measureMode={measureMode}
         />
+
+        {/* Legend toggle */}
+        <div style={{ position: 'absolute', bottom: 36, left: 10, zIndex: 1000 }}>
+          <button
+            onClick={() => setLegendOpen(v => !v)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '5px',
+              padding: '5px 10px', borderRadius: '4px', cursor: 'pointer',
+              border: `1px solid ${legendOpen ? 'var(--color-accent)' : 'var(--color-border)'}`,
+              background: legendOpen ? 'rgba(34,197,94,0.08)' : 'rgba(17,17,17,0.88)',
+              color: legendOpen ? 'var(--color-accent)' : 'var(--color-muted)',
+              fontFamily: 'var(--font-mono)', fontSize: '10px', letterSpacing: '0.08em',
+              backdropFilter: 'blur(6px)', transition: 'all 0.15s',
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+              <rect x="1" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <rect x="1" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.5"/>
+              <line x1="9" y1="4.5" x2="15" y2="4.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="9" y1="11.5" x2="15" y2="11.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            MAP KEY
+          </button>
+
+          {legendOpen && (
+            <div style={{
+              position: 'absolute', bottom: '100%', left: 0, marginBottom: '6px',
+              background: 'rgba(17,17,17,0.96)', border: '1px solid var(--color-border)',
+              borderRadius: '8px', padding: '14px', minWidth: '190px',
+              backdropFilter: 'blur(8px)', boxShadow: '0 4px 24px rgba(0,0,0,0.6)',
+            }}>
+              <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                Event Sources
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '13px' }}>
+                {LEGEND_SOURCES.map(l => (
+                  <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-muted)' }}>
+                    <LegendShape shape={l.shape} color={l.color} />
+                    {l.label}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ borderTop: '1px solid var(--color-border)', paddingTop: '11px' }}>
+                <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '8px' }}>
+                  Severity
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                  {LEGEND_SEVERITY.map(l => (
+                    <div key={l.label} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-muted)' }}>
+                      <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: l.color, flexShrink: 0 }} />
+                      {l.label}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Fire panel */}
         {firesActive && firePanelOpen && (

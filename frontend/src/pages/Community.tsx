@@ -188,7 +188,9 @@ export default function Community() {
   const [sort, setSort] = useState<Sort>('recent')
   const [search, setSearch] = useState('')
   const citeSlug = searchParams.get('cite')
-  const [showForm, setShowForm] = useState(!!citeSlug)
+  const initLat = searchParams.get('lat') ?? ''
+  const initLon = searchParams.get('lon') ?? ''
+  const [showForm, setShowForm] = useState(!!(citeSlug || (initLat && initLon)))
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [locating, setLocating] = useState(false)
@@ -205,13 +207,13 @@ export default function Community() {
   const defaultCategory = channel.category ?? ''
 
   const [form, setForm] = useState({
-    post_type: defaultType,
+    post_type: initLat && initLon ? 'field_report' : defaultType,
     category: defaultCategory,
     title: '',
     body: citeSlug ? `#${citeSlug} ` : '',
     location_label: '',
-    latitude: '',
-    longitude: '',
+    latitude: initLat,
+    longitude: initLon,
   })
 
   function selectChannel(id: string) {

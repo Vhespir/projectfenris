@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Viewer, Cartesian3, Color, ImageryLayer, UrlTemplateImageryProvider,
   WebMapServiceImageryProvider, GeoJsonDataSource, CustomDataSource,
   ColorMaterialProperty, ConstantProperty, ScreenSpaceEventType,
   JulianDate, Credit, HeightReference, defined, Entity, Cartesian2,
+  Ion, Terrain,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { DisasterEvent, AirTrafficFilters, FireTimeRange } from './MapEventLayer'
@@ -82,6 +84,59 @@ function altColor(onGround: boolean, baroAlt: number | null, emergency: boolean)
   return '#CBD5E1'
 }
 
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.asin(Math.sqrt(a))
+}
+
+function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180
+  const Δλ = (lon2 - lon1) * Math.PI / 180
+  return (Math.atan2(Math.sin(Δλ) * Math.cos(φ2), Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)) * 180 / Math.PI + 360) % 360
+}
+
+function clusterBadgeUrl(count: number): string {
+  const label = count >= 1000 ? `${Math.floor(count / 1000)}k` : String(count)
+  const [bg, ring] = count >= 50
+    ? ['#EF4444', 'rgba(239,68,68,0.28)']
+    : count >= 10
+      ? ['#F59E0B', 'rgba(245,158,11,0.28)']
+      : ['#22C55E', 'rgba(34,197,94,0.28)']
+  const size = count >= 100 ? 46 : count >= 50 ? 42 : count >= 10 ? 38 : 32
+  const fs = label.length > 2 ? 11 : 13
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 40 40">
+    <circle cx="20" cy="20" r="19" fill="${ring}"/>
+    <circle cx="20" cy="20" r="15" fill="${bg}" fill-opacity="0.92" stroke="#0A0A0A" stroke-width="1.5"/>
+    <text x="20" y="20" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-weight="700" font-size="${fs}" fill="#FFFFFF">${label}</text>
+  </svg>`
+  return 'data:image/svg+xml;base64,' + btoa(svg)
+}
+
+function setupClustering(ds: CustomDataSource, pixelRange = 60) {
+  ds.clustering.enabled = true
+  ds.clustering.pixelRange = pixelRange
+  ds.clustering.minimumClusterSize = 2
+  ds.clustering.clusterEvent.addEventListener((entities: Entity[], cluster: unknown) => {
+    const c = cluster as {
+      billboard: { show: boolean; image: string; width: number; height: number; disableDepthTestDistance: number }
+      label: { show: boolean }
+      point: { show: boolean }
+    }
+    const n = entities.length
+    const sz = n >= 100 ? 46 : n >= 50 ? 42 : n >= 10 ? 38 : 32
+    c.label.show = false
+    c.point.show = false
+    c.billboard.show = true
+    c.billboard.image = clusterBadgeUrl(n)
+    c.billboard.width = sz
+    c.billboard.height = sz
+    c.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY
+  })
+}
+
 function passesAtFilter(s: unknown[], filters: AirTrafficFilters): boolean {
   const onGround = s[8] as boolean
   const baroAlt  = s[7] as number | null
@@ -125,14 +180,21 @@ interface CesiumMapProps {
   onAtCount: (n: number) => void
   fireRange: FireTimeRange
   flyToRef?: React.MutableRefObject<((lat: number, lon: number) => void) | null>
+  initialFlyTo?: { lat: number; lon: number }
+  measureMode?: boolean
 }
 
 export default function CesiumMap({
-  events, activeFilters, activeOverlays, atFilters, onAtCount, fireRange, flyToRef,
+  events, activeFilters, activeOverlays, atFilters, onAtCount, fireRange, flyToRef, initialFlyTo, measureMode,
 }: CesiumMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<Viewer | null>(null)
-  const [popup, setPopup] = useState<{ html: string; x: number; y: number } | null>(null)
+  const navigate = useNavigate()
+  const [sidebar, setSidebar] = useState<{ html: string } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lat: number; lon: number } | null>(null)
+  const [measurePoints, setMeasurePoints] = useState<[number, number][]>([])
+  const measureModeRef = useRef(false)
+  const measureSourceRef = useRef<CustomDataSource | null>(null)
 
   const radarLayerRef = useRef<ImageryLayer | null>(null)
   const alertsSourceRef = useRef<GeoJsonDataSource | null>(null)
@@ -149,6 +211,8 @@ export default function CesiumMap({
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return
 
+    Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN as string
+
     const viewer = new Viewer(containerRef.current, {
       animation: false,
       baseLayerPicker: false,
@@ -160,6 +224,7 @@ export default function CesiumMap({
       selectionIndicator: false,
       timeline: false,
       navigationHelpButton: false,
+      terrain: Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true }),
       navigationInstructionsInitiallyVisible: false,
     })
 
@@ -178,6 +243,8 @@ export default function CesiumMap({
     viewer.scene.backgroundColor = Color.fromCssColorString('#0A0A0A')
     viewer.scene.globe.baseColor = Color.fromCssColorString('#111111')
     viewer.scene.globe.showGroundAtmosphere = false
+    viewer.scene.globe.enableLighting = true
+    viewer.scene.globe.dynamicAtmosphereLightingFromSun = true
     if (viewer.scene.sun) viewer.scene.sun.show = false
     if (viewer.scene.moon) viewer.scene.moon.show = false
     if (viewer.scene.skyBox) viewer.scene.skyBox.show = false
@@ -188,7 +255,13 @@ export default function CesiumMap({
       orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
     })
 
-    if ('geolocation' in navigator) {
+    if (initialFlyTo) {
+      viewer.camera.flyTo({
+        destination: Cartesian3.fromDegrees(initialFlyTo.lon, initialFlyTo.lat, 3000000),
+        orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
+        duration: 2,
+      })
+    } else if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(pos => {
         viewerRef.current?.camera.flyTo({
           destination: Cartesian3.fromDegrees(pos.coords.longitude, pos.coords.latitude, 8000000),
@@ -199,19 +272,46 @@ export default function CesiumMap({
     }
 
     viewer.screenSpaceEventHandler.setInputAction((click: { position: Cartesian2 }) => {
+      setContextMenu(null)
+
+      if (measureModeRef.current) {
+        const ray = viewer.scene.camera.getPickRay(click.position)
+        if (!ray) return
+        const intersection = viewer.scene.globe.pick(ray, viewer.scene)
+        if (!intersection) return
+        const carto = viewer.scene.globe.ellipsoid.cartesianToCartographic(intersection)
+        if (!carto) return
+        const lat = carto.latitude * (180 / Math.PI)
+        const lon = carto.longitude * (180 / Math.PI)
+        setMeasurePoints(prev => prev.length >= 2 ? [[lon, lat]] : [...prev, [lon, lat]])
+        return
+      }
+
       const picked = viewer.scene.pick(click.position)
       if (defined(picked) && picked.id instanceof Entity) {
         const desc = (picked.id as Entity).description?.getValue(JulianDate.now()) as string | undefined
         if (desc) {
-          const canvasRect = containerRef.current!.getBoundingClientRect()
-          const x = Math.min(click.position.x + 10, canvasRect.width - 280)
-          const y = Math.min(click.position.y + 10, canvasRect.height - 200)
-          setPopup({ html: desc, x, y })
+          setSidebar({ html: desc })
           return
         }
       }
-      setPopup(null)
+      setSidebar(null)
     }, ScreenSpaceEventType.LEFT_CLICK)
+
+    viewer.screenSpaceEventHandler.setInputAction((click: { position: Cartesian2 }) => {
+      const ray = viewer.scene.camera.getPickRay(click.position)
+      if (!ray) { setContextMenu(null); return }
+      const intersection = viewer.scene.globe.pick(ray, viewer.scene)
+      if (!intersection) { setContextMenu(null); return }
+      const carto = viewer.scene.globe.ellipsoid.cartesianToCartographic(intersection)
+      if (!carto) { setContextMenu(null); return }
+      const lat = carto.latitude * (180 / Math.PI)
+      const lon = carto.longitude * (180 / Math.PI)
+      const canvasRect = containerRef.current!.getBoundingClientRect()
+      const x = Math.min(click.position.x, canvasRect.width - 230)
+      const y = Math.min(click.position.y, canvasRect.height - 100)
+      setContextMenu({ x, y, lat, lon })
+    }, ScreenSpaceEventType.RIGHT_CLICK)
 
     viewerRef.current = viewer
 
@@ -236,6 +336,65 @@ export default function CesiumMap({
     return () => { if (flyToRef) flyToRef.current = null }
   }, [flyToRef])
 
+  // ── Measure mode sync ────────────────────────────────────────────────────────
+  useEffect(() => {
+    measureModeRef.current = !!measureMode
+    if (!measureMode) {
+      setMeasurePoints([])
+      if (measureSourceRef.current && viewerRef.current) {
+        measureSourceRef.current.entities.removeAll()
+      }
+    }
+  }, [measureMode])
+
+  // ── Measure drawing ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+
+    if (!measureSourceRef.current) {
+      measureSourceRef.current = new CustomDataSource('measure')
+      viewer.dataSources.add(measureSourceRef.current)
+    }
+    measureSourceRef.current.entities.removeAll()
+    if (measurePoints.length === 0) return
+
+    const [p1] = measurePoints
+    measureSourceRef.current.entities.add({
+      position: Cartesian3.fromDegrees(p1[0], p1[1]) as never,
+      billboard: {
+        image: svgUrl('circle', '#22C55E', 16),
+        width: 16, height: 16,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        heightReference: HeightReference.CLAMP_TO_GROUND,
+      },
+    })
+
+    if (measurePoints.length === 2) {
+      const p2 = measurePoints[1]
+      measureSourceRef.current.entities.add({
+        position: Cartesian3.fromDegrees(p2[0], p2[1]) as never,
+        billboard: {
+          image: svgUrl('circle', '#22C55E', 16),
+          width: 16, height: 16,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          heightReference: HeightReference.CLAMP_TO_GROUND,
+        },
+      })
+      measureSourceRef.current.entities.add({
+        polyline: {
+          positions: [
+            Cartesian3.fromDegrees(p1[0], p1[1]),
+            Cartesian3.fromDegrees(p2[0], p2[1]),
+          ] as never,
+          width: 2,
+          material: new ColorMaterialProperty(Color.fromCssColorString('#22C55E').withAlpha(0.85)) as never,
+          clampToGround: true,
+        } as never,
+      })
+    }
+  }, [measurePoints])
+
   // ── Event markers ────────────────────────────────────────────────────────────
   useEffect(() => {
     const viewer = viewerRef.current
@@ -243,6 +402,7 @@ export default function CesiumMap({
 
     if (!eventsSourceRef.current) {
       eventsSourceRef.current = new CustomDataSource('events')
+      setupClustering(eventsSourceRef.current, 60)
       viewer.dataSources.add(eventsSourceRef.current)
     }
     eventsSourceRef.current.entities.removeAll()
@@ -508,6 +668,7 @@ export default function CesiumMap({
 
     if (!reportsSourceRef.current) {
       reportsSourceRef.current = new CustomDataSource('field-reports')
+      setupClustering(reportsSourceRef.current, 50)
       viewer.dataSources.add(reportsSourceRef.current)
     }
 
@@ -683,6 +844,7 @@ export default function CesiumMap({
 
     if (!atSourceRef.current) {
       atSourceRef.current = new CustomDataSource('air-traffic')
+      setupClustering(atSourceRef.current, 35)
       viewer.dataSources.add(atSourceRef.current)
     }
 
@@ -765,38 +927,153 @@ export default function CesiumMap({
     <div style={{ position: 'absolute', inset: 0 }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 
-      {popup && (
+      {/* Detail sidebar */}
+      <div
+        style={{
+          position: 'absolute', top: 0, right: 0, bottom: 0, width: '300px',
+          transform: sidebar ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.22s cubic-bezier(0.4,0,0.2,1)',
+          zIndex: 1000, pointerEvents: sidebar ? 'auto' : 'none',
+          background: 'rgba(13,13,13,0.97)',
+          borderLeft: '1px solid var(--color-border)',
+          backdropFilter: 'blur(12px)',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '-8px 0 32px rgba(0,0,0,0.5)',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 14px', borderBottom: '1px solid var(--color-border)', flexShrink: 0,
+        }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+            Event Detail
+          </span>
+          <button
+            onClick={() => setSidebar(null)}
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              color: 'var(--color-muted)', fontSize: '18px', lineHeight: 1,
+              padding: '2px 4px', display: 'flex', alignItems: 'center',
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
+          {sidebar && <div dangerouslySetInnerHTML={{ __html: sidebar.html }} />}
+        </div>
+      </div>
+
+      {/* Measure result panel */}
+      {measureMode && (
+        <div style={{
+          position: 'absolute', bottom: 36, left: '50%', transform: 'translateX(-50%)',
+          zIndex: 1000, pointerEvents: 'none',
+          background: 'rgba(13,13,13,0.96)', border: '1px solid var(--color-border)',
+          borderRadius: '8px', padding: '10px 18px',
+          backdropFilter: 'blur(10px)', boxShadow: '0 4px 20px rgba(0,0,0,0.6)',
+          fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-muted)',
+          textAlign: 'center', minWidth: '240px',
+        }}>
+          {measurePoints.length === 0 && 'Click a point on the globe to start measuring'}
+          {measurePoints.length === 1 && 'Click a second point to measure distance'}
+          {measurePoints.length === 2 && (() => {
+            const [p1, p2] = measurePoints
+            const km = haversineKm(p1[1], p1[0], p2[1], p2[0])
+            const mi = km * 0.6214
+            const brg = bearingDeg(p1[1], p1[0], p2[1], p2[0])
+            return (
+              <div style={{ display: 'flex', gap: '20px', justifyContent: 'center', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-accent)' }}>{km.toFixed(1)} km</div>
+                  <div style={{ fontSize: '11px', color: 'var(--color-subtle)' }}>{mi.toFixed(1)} mi</div>
+                </div>
+                <div style={{ width: '1px', height: '30px', background: 'var(--color-border)' }} />
+                <div>
+                  <div style={{ fontSize: '16px', fontWeight: 600, color: 'var(--color-text)' }}>{Math.round(brg)}°</div>
+                  <div style={{ fontSize: '11px', color: 'var(--color-subtle)' }}>bearing</div>
+                </div>
+                <div style={{ width: '1px', height: '30px', background: 'var(--color-border)' }} />
+                <div style={{ pointerEvents: 'auto' }}>
+                  <button
+                    onClick={() => setMeasurePoints([])}
+                    style={{ background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '4px', padding: '4px 10px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)' }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+      )}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
         <div
           style={{
-            position: 'absolute',
-            left: popup.x,
-            top: popup.y,
-            zIndex: 1000,
-            pointerEvents: 'auto',
-            maxWidth: 280,
+            position: 'absolute', left: contextMenu.x, top: contextMenu.y,
+            zIndex: 1100, pointerEvents: 'auto',
           }}
           onClick={e => e.stopPropagation()}
         >
           <div style={{
-            background: 'rgba(17,17,17,0.97)',
-            border: '1px solid var(--color-border)',
-            borderRadius: '8px',
-            padding: '14px',
-            backdropFilter: 'blur(8px)',
-            boxShadow: '0 4px 24px rgba(0,0,0,0.7)',
+            background: 'rgba(13,13,13,0.97)', border: '1px solid var(--color-border)',
+            borderRadius: '6px', overflow: 'hidden',
+            backdropFilter: 'blur(10px)', boxShadow: '0 4px 20px rgba(0,0,0,0.7)',
+            minWidth: '220px',
           }}>
+            <div style={{ padding: '7px 12px', borderBottom: '1px solid var(--color-border)', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)' }}>
+              {contextMenu.lat.toFixed(4)}, {contextMenu.lon.toFixed(4)}
+            </div>
             <button
-              onClick={() => setPopup(null)}
-              style={{
-                position: 'absolute', top: 8, right: 8,
-                background: 'transparent', border: 'none', cursor: 'pointer',
-                color: 'var(--color-muted)', fontSize: '16px', lineHeight: 1,
-                padding: '2px 6px',
+              onClick={() => {
+                const p = new URLSearchParams({
+                  channel: 'field',
+                  lat: contextMenu.lat.toFixed(5),
+                  lon: contextMenu.lon.toFixed(5),
+                })
+                navigate(`/community?${p.toString()}`)
+                setContextMenu(null)
               }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                width: '100%', padding: '9px 12px', background: 'transparent',
+                border: 'none', cursor: 'pointer', textAlign: 'left',
+                fontFamily: 'var(--font-display)', fontSize: '13px', color: 'var(--color-text)',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,158,11,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
             >
-              ×
+              <span style={{ fontSize: '15px' }}>!</span>
+              File Field Report Here
             </button>
-            <div dangerouslySetInnerHTML={{ __html: popup.html }} />
+            <button
+              onClick={() => {
+                if (viewerRef.current) {
+                  viewerRef.current.camera.flyTo({
+                    destination: Cartesian3.fromDegrees(contextMenu.lon, contextMenu.lat, 500000),
+                    orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
+                    duration: 1.5,
+                  })
+                }
+                setContextMenu(null)
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                width: '100%', padding: '9px 12px', background: 'transparent',
+                border: 'none', cursor: 'pointer', textAlign: 'left',
+                fontFamily: 'var(--font-display)', fontSize: '13px', color: 'var(--color-text)',
+                transition: 'background 0.1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(34,197,94,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span style={{ fontSize: '13px' }}>⊕</span>
+              Zoom to Location
+            </button>
           </div>
         </div>
       )}

@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
 import { useSocket } from '../context/SocketContext'
@@ -161,6 +161,8 @@ function EventCard({ item }: { item: EventItem }) {
   const color = SEVERITY_COLOR[item.severity] ?? 'var(--color-muted)'
   const p = item.properties as Record<string, string>
   const { open: openDrawer } = useContextDrawer()
+  const navigate = useNavigate()
+  const centroid = item.geometry ? eventCentroid(item.geometry) : null
 
   return (
     <div style={{
@@ -190,6 +192,28 @@ function EventCard({ item }: { item: EventItem }) {
           {timeAgo(item.fetched_at)}
           {item.expires_at && ` · expires ${new Date(item.expires_at).toLocaleString()}`}
         </span>
+        {centroid && (
+          <button
+            onClick={e => { e.stopPropagation(); navigate('/map', { state: { flyTo: { lat: centroid[0], lon: centroid[1] } } }) }}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: '4px',
+              background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '4px',
+              cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px',
+              color: 'var(--color-muted)', letterSpacing: '0.04em', padding: '2px 7px',
+              transition: 'color 0.15s, border-color 0.15s',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.color = 'var(--color-accent)'; e.currentTarget.style.borderColor = 'rgba(34,197,94,0.4)' }}
+            onMouseLeave={e => { e.currentTarget.style.color = 'var(--color-muted)'; e.currentTarget.style.borderColor = 'var(--color-border)' }}
+          >
+            <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5"/>
+              <line x1="8" y1="2" x2="8" y2="14" stroke="currentColor" strokeWidth="1.5"/>
+              <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor" strokeWidth="1.5"/>
+              <ellipse cx="8" cy="8" rx="3" ry="6" stroke="currentColor" strokeWidth="1"/>
+            </svg>
+            Map
+          </button>
+        )}
         {item.slug && (
           <>
             <CiteButton slug={item.slug} />
