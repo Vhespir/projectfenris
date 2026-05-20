@@ -185,12 +185,14 @@ export default function CesiumMap({
 
     viewer.camera.setView({
       destination: Cartesian3.fromDegrees(0, 20, 18000000),
+      orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
     })
 
     if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(pos => {
         viewerRef.current?.camera.flyTo({
-          destination: Cartesian3.fromDegrees(pos.coords.longitude, pos.coords.latitude, 5000000),
+          destination: Cartesian3.fromDegrees(pos.coords.longitude, pos.coords.latitude, 8000000),
+          orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
           duration: 2,
         })
       }, () => {})
@@ -227,6 +229,7 @@ export default function CesiumMap({
     flyToRef.current = (lat: number, lon: number) => {
       viewerRef.current?.camera.flyTo({
         destination: Cartesian3.fromDegrees(lon, lat, 3000000),
+        orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
         duration: 2,
       })
     }
@@ -759,8 +762,8 @@ export default function CesiumMap({
   }, [atFilters, renderAtStates])
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
 
       {popup && (
         <div
