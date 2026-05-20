@@ -5,7 +5,7 @@ import {
   WebMapServiceImageryProvider, GeoJsonDataSource, CustomDataSource,
   ColorMaterialProperty, ConstantProperty, ScreenSpaceEventType,
   JulianDate, Credit, HeightReference, defined, Entity, Cartesian2,
-  Ion, Terrain,
+  Ion, createWorldTerrainAsync,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { DisasterEvent, AirTrafficFilters, FireTimeRange } from './MapEventLayer'
@@ -224,7 +224,6 @@ export default function CesiumMap({
       selectionIndicator: false,
       timeline: false,
       navigationHelpButton: false,
-      terrain: Terrain.fromWorldTerrain({ requestVertexNormals: true, requestWaterMask: true }),
       navigationInstructionsInitiallyVisible: false,
     })
 
@@ -239,6 +238,10 @@ export default function CesiumMap({
         })
       )
     )
+
+    createWorldTerrainAsync({ requestVertexNormals: true, requestWaterMask: true })
+      .then(provider => { if (viewerRef.current) viewerRef.current.terrainProvider = provider })
+      .catch(() => {})
 
     viewer.scene.backgroundColor = Color.fromCssColorString('#0A0A0A')
     viewer.scene.globe.baseColor = Color.fromCssColorString('#111111')
