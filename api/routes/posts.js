@@ -15,6 +15,7 @@ const CATEGORY_TO_CHANNEL = {
 const CHANNEL_FILTER_MAP = {
   field:     { type: 'field_report',       category: null },
   news:      { type: 'self_reported_news', category: null },
+  pattern:   { type: 'pattern',            category: null },
   gear:      { type: 'community', category: 'Gear and Equipment' },
   food:      { type: 'community', category: 'Food and Water' },
   medical:   { type: 'community', category: 'Medical and First Aid' },
@@ -121,7 +122,7 @@ export async function postRoutes(app, { pool }) {
       return reply.code(400).send({ error: 'post_type, category, title, and body are required' })
     }
 
-    const validTypes = ['community', 'field_report', 'self_reported_news', 'pattern']
+    const validTypes = ['community', 'field_report', 'self_reported_news']
     if (!validTypes.includes(post_type)) {
       return reply.code(400).send({ error: 'Invalid post_type' })
     }
@@ -148,7 +149,6 @@ export async function postRoutes(app, { pool }) {
 
     const channelId = post_type === 'field_report' ? 'field'
       : post_type === 'self_reported_news' ? 'news'
-      : post_type === 'pattern' ? 'patterns'
       : (CATEGORY_TO_CHANNEL[category] ?? 'general')
     emitToChannel(channelId, 'new_post', rows[0])
     emitToChannel('all', 'new_post', rows[0])

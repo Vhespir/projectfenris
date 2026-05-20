@@ -252,15 +252,11 @@ function NewsCard({ item }: { item: NewsItem }) {
 const POST_TYPE_COLOR: Record<string, string> = {
   field_report:        '#F59E0B',
   self_reported_news:  '#3B82F6',
-  pattern:             '#F97316',
 }
 const POST_TYPE_LABEL: Record<string, string> = {
   field_report:        'Field Report',
   self_reported_news:  'Community Report',
-  pattern:             'Pattern Analysis',
 }
-
-const PATTERN_VALIDATED_THRESHOLD = 5
 
 function PostCard({ item }: { item: PostItem }) {
   const color = POST_TYPE_COLOR[item.post_type] ?? 'var(--color-muted)'
@@ -278,15 +274,6 @@ function PostCard({ item }: { item: PostItem }) {
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '7px', flexWrap: 'wrap' }}>
           <SourceBadge label={label} verified={false} />
-          {item.post_type === 'pattern' && item.upvote_count >= PATTERN_VALIDATED_THRESHOLD && (
-            <span style={{
-              fontSize: '9px', fontFamily: 'var(--font-mono)', padding: '2px 7px', borderRadius: '3px',
-              background: 'rgba(34,197,94,0.12)', color: 'var(--color-accent)', border: '1px solid rgba(34,197,94,0.3)',
-              textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 700,
-            }}>
-              Validated
-            </span>
-          )}
           <span style={{ fontSize: '11px', color: 'var(--color-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             {item.category.replace(/_/g, ' ')}
           </span>
