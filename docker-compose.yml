@@ -38,6 +38,7 @@ services:
         condition: service_healthy
     networks:
       - fenris-network
+      - coolify
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=coolify"
@@ -74,6 +75,7 @@ services:
       NODE_ENV: development
     networks:
       - fenris-network
+      - coolify
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=coolify"
@@ -97,3 +99,6 @@ volumes:
 networks:
   fenris-network:
     driver: bridge
+  coolify:
+    external: true
+    name: coolify
