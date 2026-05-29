@@ -42,13 +42,24 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=coolify"
-      - "traefik.http.routers.fenris-api-http.rule=Host(`projectfenris.com`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
+      # /api/* — strip the /api prefix before forwarding
+      - "traefik.http.routers.fenris-api-http.rule=Host(`projectfenris.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fenris-api-http.entrypoints=http"
       - "traefik.http.routers.fenris-api-http.middlewares=redirect-to-https"
-      - "traefik.http.routers.fenris-api-https.rule=Host(`projectfenris.com`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
+      - "traefik.http.routers.fenris-api-https.rule=Host(`projectfenris.com`) && PathPrefix(`/api`)"
       - "traefik.http.routers.fenris-api-https.entrypoints=https"
       - "traefik.http.routers.fenris-api-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fenris-api-https.middlewares=fenris-strip-api"
       - "traefik.http.routers.fenris-api-https.service=fenris-api"
+      - "traefik.http.middlewares.fenris-strip-api.stripprefix.prefixes=/api"
+      # /uploads/* and /socket.io — pass through as-is
+      - "traefik.http.routers.fenris-passthrough-http.rule=Host(`projectfenris.com`) && (PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
+      - "traefik.http.routers.fenris-passthrough-http.entrypoints=http"
+      - "traefik.http.routers.fenris-passthrough-http.middlewares=redirect-to-https"
+      - "traefik.http.routers.fenris-passthrough-https.rule=Host(`projectfenris.com`) && (PathPrefix(`/uploads`) || PathPrefix(`/socket.io`))"
+      - "traefik.http.routers.fenris-passthrough-https.entrypoints=https"
+      - "traefik.http.routers.fenris-passthrough-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fenris-passthrough-https.service=fenris-api"
       - "traefik.http.services.fenris-api.loadbalancer.server.port=3001"
 
   worker:
