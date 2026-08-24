@@ -116,7 +116,10 @@ export async function postRoutes(app, { pool }) {
   })
 
   // Create post
-  app.post('/posts', { preHandler: [app.authenticate] }, async (req, reply) => {
+  app.post('/posts', {
+    preHandler: [app.authenticate],
+    config: { rateLimit: { max: 10, timeWindow: '1 hour' } },
+  }, async (req, reply) => {
     if (await checkMuted(pool, req.user.id, reply)) return
     const { post_type, category, title, body, location_label, latitude, longitude } = req.body ?? {}
 

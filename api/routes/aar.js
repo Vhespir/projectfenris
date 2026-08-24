@@ -61,7 +61,10 @@ export async function aarRoutes(app, { pool }) {
   })
 
   // Create AAR
-  app.post('/aar', { preHandler: [app.authenticate] }, async (req, reply) => {
+  app.post('/aar', {
+    preHandler: [app.authenticate],
+    config: { rateLimit: { max: 10, timeWindow: '1 hour' } },
+  }, async (req, reply) => {
     if (await checkMuted(pool, req.user.id, reply)) return
     const {
       title, incident_type, location_label, state, duration,
