@@ -1,6 +1,5 @@
 import axios from 'axios'
 import pg from 'pg'
-import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -30,11 +29,11 @@ export async function fetchNOAA() {
       const { rowCount } = await pool.query(`
         INSERT INTO disaster_events
           (source, event_type, title, severity, geometry, properties,
-           external_id, starts_at, expires_at, slug)
+           external_id, starts_at, expires_at)
         VALUES (
           $1, $2, $3, $4,
           CASE WHEN $5::text IS NOT NULL THEN ST_GeomFromGeoJSON($5) ELSE NULL END,
-          $6, $7, $8, $9, $10
+          $6, $7, $8, $9
         )
         ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
       `, [
@@ -47,7 +46,6 @@ export async function fetchNOAA() {
         p.id,
         p.onset || p.effective || null,
         p.expires || null,
-        generateSlug(),
       ])
 
       stored += rowCount
