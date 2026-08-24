@@ -103,7 +103,12 @@ services:
       # exact host the browser used -- serving both hosts live (no redirect)
       # would silently log users out depending on which one they landed on.
       - "traefik.http.middlewares.fenris-www-redirect.redirectregex.regex=^https?://www\\.projectfenris\\.com/(.*)"
-      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.replacement=https://projectfenris.com/$${1}"
+      # Four dollar signs, not two: Coolify runs its own $-collapsing pass over
+      # this file before handing it to `docker compose`, which then does its
+      # own native $$ -> $ pass on top. $${1} only survives one round and
+      # reaches Traefik as the literal text "${1}" (visible in the redirected
+      # URL) instead of a live regex backreference -- $$$${1} survives both.
+      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.replacement=https://projectfenris.com/$$$${1}"
       - "traefik.http.middlewares.fenris-www-redirect.redirectregex.permanent=true"
       - "traefik.http.routers.fenris-www-http.rule=Host(`www.projectfenris.com`)"
       - "traefik.http.routers.fenris-www-http.entrypoints=http"
