@@ -102,13 +102,16 @@ services:
       # The session cookie has no explicit domain, so it's pinned to whichever
       # exact host the browser used -- serving both hosts live (no redirect)
       # would silently log users out depending on which one they landed on.
-      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.regex=^https?://www\\.projectfenris\\.com/(.*)"
-      # Four dollar signs, not two: Coolify runs its own $-collapsing pass over
-      # this file before handing it to `docker compose`, which then does its
-      # own native $$ -> $ pass on top. $${1} only survives one round and
-      # reaches Traefik as the literal text "${1}" (visible in the redirected
-      # URL) instead of a live regex backreference -- $$$${1} survives both.
-      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.replacement=https://projectfenris.com/$$$${1}"
+      # No capture group here on purpose. $-escaping for a $1/${1} backreference
+      # through Docker Compose's label interpolation into Traefik was tried twice
+      # (two dollar signs, then four) and both landed as literal, unexpanded text
+      # in the redirect target -- Traefik was not treating either as a
+      # backreference. Rather than keep guessing at escaping through a redeploy
+      # cycle each time, this redirects to the bare root instead of preserving
+      # the path. Deep links via www won't carry their path over; acceptable
+      # tradeoff for a domain that's not the canonical one anyway.
+      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.regex=^https?://www\\.projectfenris\\.com/.*"
+      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.replacement=https://projectfenris.com/"
       - "traefik.http.middlewares.fenris-www-redirect.redirectregex.permanent=true"
       - "traefik.http.routers.fenris-www-http.rule=Host(`www.projectfenris.com`)"
       - "traefik.http.routers.fenris-www-http.entrypoints=http"
