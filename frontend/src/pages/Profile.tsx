@@ -243,6 +243,22 @@ export default function Profile() {
               )}
               <span>Joined {joinDate(profile.created_at)}</span>
             </div>
+
+            {isOwn && profile.is_founding_member && (
+              <a
+                href="https://discord.gg/T9PTacJzah"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px',
+                  padding: '6px 12px', borderRadius: '6px', textDecoration: 'none',
+                  background: '#5865F218', color: '#5865F2', border: '1px solid #5865F240',
+                  fontFamily: 'var(--font-mono)', fontSize: '11px',
+                }}
+              >
+                You're a Founding Member -- join the founding members Discord
+              </a>
+            )}
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', alignItems: 'flex-end', flexShrink: 0 }}>
