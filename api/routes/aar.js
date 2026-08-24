@@ -1,3 +1,5 @@
+import { checkMuted } from '../lib/moderation.js'
+
 const VALID_TYPES = [
   'hurricane', 'earthquake', 'wildfire', 'flood', 'tornado', 'winter_storm',
   'power_outage', 'medical', 'financial', 'civil_unrest', 'evacuation', 'other',
@@ -60,6 +62,7 @@ export async function aarRoutes(app, { pool }) {
 
   // Create AAR
   app.post('/aar', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (await checkMuted(pool, req.user.id, reply)) return
     const {
       title, incident_type, location_label, state, duration,
       narrative, what_worked = [], what_failed = [], wish_had = [], key_takeaway,

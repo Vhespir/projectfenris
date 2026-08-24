@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+# STALE -- written for the pre-Coolify bare-metal deployment (container name
+# "fenris_db", host path /var/www/sites/projectfenris-site, bare Nginx config
+# at /etc/nginx/sites-available/...). None of that exists anymore post-Coolify
+# migration (2026-05-28/30), so as-is this script cannot run successfully.
+# Local pg_dump backups now run via the `backup` service in docker-compose.yml
+# (see backup/backup.sh) instead. This file is kept only for its rclone/B2
+# upload logic, as a starting point for wiring that same off-site upload step
+# into the compose-native backup service -- do not cron this file as-is.
+#
+# Original header, for reference:
 # Fenris backup -- postgres dump, user uploads, .env, nginx config.
 # Requires: rclone configured with b2-fenris remote.
 #

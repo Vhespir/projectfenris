@@ -91,7 +91,7 @@ export async function authRoutes(app, { pool }) {
 
     const { rows } = await pool.query(
       `SELECT id, username, email, password_hash, reputation, is_trusted, avatar_url,
-              two_fa_enabled, created_at
+              two_fa_enabled, created_at, is_banned, banned_reason
        FROM users WHERE email = $1`,
       [email.trim().toLowerCase()]
     )
@@ -104,6 +104,9 @@ export async function authRoutes(app, { pool }) {
     }
 
     const user = rows[0]
+    if (user.is_banned) {
+      return reply.code(403).send({ error: `This account has been banned${user.banned_reason ? `: ${user.banned_reason}` : '.'}` })
+    }
     await pool.query('UPDATE users SET last_seen_at = NOW() WHERE id = $1', [user.id])
 
     if (user.two_fa_enabled) {
@@ -112,7 +115,7 @@ export async function authRoutes(app, { pool }) {
       return { requires_2fa: true }
     }
 
-    const { password_hash: _, two_fa_enabled: __, ...safeUser } = user
+    const { password_hash: _, two_fa_enabled: __, is_banned: ___, banned_reason: ____, ...safeUser } = user
     const token = app.jwt.sign({ id: user.id, username: user.username }, { expiresIn: '30d' })
     reply.setCookie('session', token, COOKIE_OPTS)
     return { user: safeUser }
@@ -304,7 +307,7 @@ export async function authRoutes(app, { pool }) {
       `SELECT id, username, email, reputation, is_trusted, is_moderator,
               region_state, region_county, avatar_url, two_fa_enabled,
               preferences, notification_prefs, created_at, last_seen_at, user_lat, user_lon,
-              (id <= 100) AS is_founding_member
+              muted_until, (id <= 100) AS is_founding_member
        FROM users WHERE id = $1`,
       [req.user.id]
     )

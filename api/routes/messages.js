@@ -1,4 +1,5 @@
 import { emitToUser } from '../lib/socket.js'
+import { checkMuted } from '../lib/moderation.js'
 
 export async function messageRoutes(app, { pool }) {
   app.get('/messages/unread-count', { preHandler: [app.authenticate] }, async (req) => {
@@ -65,6 +66,7 @@ export async function messageRoutes(app, { pool }) {
     preHandler: [app.authenticate],
     config: { rateLimit: { max: 30, timeWindow: '1 minute' } },
   }, async (req, reply) => {
+    if (await checkMuted(pool, req.user.id, reply)) return
     const { body } = req.body ?? {}
     if (!body?.trim()) return reply.code(400).send({ error: 'Message cannot be empty' })
     if (body.trim().length > 2000) return reply.code(400).send({ error: 'Message must be 2,000 characters or fewer' })
