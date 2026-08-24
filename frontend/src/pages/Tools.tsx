@@ -1030,9 +1030,190 @@ function InventoryManager() {
   )
 }
 
+// ─── Prep Score ─────────────────────────────────────────────────────────────
+// Reads what's already tracked in Inventory Manager (same kits/items, same
+// server sync + local-guest fallback) and turns it into one readiness number
+// plus a per-pillar breakdown. No new backend, no re-entering data -- the
+// point is tying data that already exists in the platform together instead
+// of asking for it twice.
+
+const PILLAR_ORDER = [
+  'Water', 'Food', 'Medical', 'Shelter & Clothing',
+  'Power & Lighting', 'Communications', 'Documents & Finance', 'Tools & Supplies',
+] as const
+
+const PILLAR_CATEGORY_MAP: Record<string, typeof PILLAR_ORDER[number]> = {
+  Water: 'Water',
+  Food: 'Food',
+  Medical: 'Medical', 'Wound Care': 'Medical', Trauma: 'Medical', Airway: 'Medical', Medications: 'Medical',
+  Shelter: 'Shelter & Clothing', Bedding: 'Shelter & Clothing', Clothing: 'Shelter & Clothing',
+  Power: 'Power & Lighting', Lighting: 'Power & Lighting', Fire: 'Power & Lighting',
+  Comms: 'Communications',
+  Documents: 'Documents & Finance',
+}
+
+function pillarFor(category: string): typeof PILLAR_ORDER[number] {
+  return PILLAR_CATEGORY_MAP[category] ?? 'Tools & Supplies'
+}
+
+function scoreTier(score: number): { label: string; color: string } {
+  if (score >= 75) return { label: 'Squared Away', color: '#22C55E' }
+  if (score >= 50) return { label: 'Prepared',      color: '#3B82F6' }
+  if (score >= 25) return { label: 'Building',      color: '#F59E0B' }
+  return { label: 'Just Starting', color: '#EF4444' }
+}
+
+function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
+  const isMobile = useIsMobile()
+  const { user } = useAuth()
+  const [items, setItems] = useState<KitItem[]>([])
+  const [kitCount, setKitCount] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const household = loadHousehold()
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      let kits: Kit[] = []
+      if (user) {
+        try {
+          const res = await fetch('/api/inventory/kits', { credentials: 'include' })
+          if (res.ok) kits = (await res.json()).map((k: any) => ({ ...k, id: String(k.id) }))
+        } catch {}
+      }
+      if (kits.length === 0) kits = loadLocalKits()
+      setKitCount(kits.length)
+
+      const perKit = await Promise.all(kits.map(async (k) => {
+        if (user && !k.id.startsWith('local_')) {
+          try {
+            const res = await fetch(`/api/inventory/kits/${k.id}/items`, { credentials: 'include' })
+            if (res.ok) {
+              return (await res.json()).map((i: any) => ({ ...i, id: String(i.id), kit_id: String(i.kit_id), qty: Number(i.qty), par: Number(i.par) })) as KitItem[]
+            }
+          } catch {}
+        }
+        return loadLocalItems(k.id)
+      }))
+      setItems(perKit.flat())
+      setLoading(false)
+    }
+    load()
+  }, [user])
+
+  const today = new Date().toISOString().slice(0, 10)
+  const expiredCount = items.filter(i => i.expiry && i.expiry < today).length
+
+  const pillarStats = PILLAR_ORDER.map(pillar => {
+    const pillarItems = items.filter(i => pillarFor(i.category) === pillar)
+    const effective = pillarItems.map(i => (i.expiry && i.expiry < today ? 0 : i.qty))
+    const ok = pillarItems.filter((i, idx) => (i.par > 0 ? effective[idx] >= i.par : effective[idx] > 0)).length
+    const pct = pillarItems.length > 0 ? Math.round((ok / pillarItems.length) * 100) : 0
+    return { pillar, pct, tracked: pillarItems.length, ok }
+  })
+
+  const overallScore = Math.round(pillarStats.reduce((sum, p) => sum + p.pct, 0) / PILLAR_ORDER.length)
+  const tier = scoreTier(overallScore)
+  const totalTracked = items.length
+  const weakPillars = pillarStats.filter(p => p.pct < 50).sort((a, b) => a.pct - b.pct)
+
+  if (loading) {
+    return <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '20px 0' }}>Loading...</div>
+  }
+
+  if (totalTracked === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: '40px 20px' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: '16px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '8px' }}>
+          Nothing tracked yet
+        </div>
+        <div style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--color-muted)', marginBottom: '20px', maxWidth: '420px', margin: '0 auto 20px' }}>
+          Prep Score reads directly from Inventory Manager -- build a kit there and this fills in on its own.
+        </div>
+        <button onClick={onOpenInventory} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+          Open Inventory Manager
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
+        <div style={{
+          width: '96px', height: '96px', borderRadius: '50%', flexShrink: 0,
+          border: `4px solid ${tier.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', background: `${tier.color}0d`,
+        }}>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: '28px', fontWeight: 700, color: tier.color, lineHeight: 1 }}>{overallScore}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>/ 100</span>
+        </div>
+        <div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 700, color: tier.color, marginBottom: '4px' }}>{tier.label}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>
+            {kitCount} kit{kitCount !== 1 ? 's' : ''} &middot; {totalTracked} item{totalTracked !== 1 ? 's' : ''} tracked
+            {expiredCount > 0 && <> &middot; <span style={{ color: 'var(--color-danger)' }}>{expiredCount} expired</span></>}
+          </div>
+          <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-subtle)', marginTop: '4px' }}>
+            Scored for a household of {household.people} people{household.pets > 0 ? `, ${household.pets} pets` : ''}, {household.days}-day target -- adjust in Inventory Manager.
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>
+          By category
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px 24px' }}>
+          {pillarStats.map(p => {
+            const color = p.pct >= 75 ? '#22C55E' : p.pct >= 50 ? '#3B82F6' : p.pct >= 25 ? '#F59E0B' : p.tracked === 0 ? 'var(--color-subtle)' : '#EF4444'
+            return (
+              <div key={p.pillar}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontFamily: 'var(--font-body)', color: 'var(--color-muted)', marginBottom: '4px' }}>
+                  <span>{p.pillar}</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', color }}>
+                    {p.tracked === 0 ? 'not started' : `${p.pct}%`}
+                  </span>
+                </div>
+                <div style={{ height: '6px', borderRadius: '3px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${p.tracked === 0 ? 0 : p.pct}%`, background: color, borderRadius: '3px' }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {weakPillars.length > 0 && (
+        <div style={{ padding: '14px 16px', borderRadius: '6px', background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)' }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>
+            Biggest gaps
+          </div>
+          <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', lineHeight: 1.7, marginBottom: '10px' }}>
+            {weakPillars.slice(0, 3).map(p => (
+              <div key={p.pillar}>
+                {p.pillar} -- {p.tracked === 0 ? 'nothing tracked yet' : `${p.ok} of ${p.tracked} items at target`}
+              </div>
+            ))}
+          </div>
+          <button onClick={onOpenInventory} style={{ padding: '7px 14px', borderRadius: '5px', border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)', color: 'var(--color-danger)', fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer' }}>
+            Fix in Inventory Manager
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Tool registry ─────────────────────────────────────────────────────────────
 
 const TOOLS = [
+  {
+    id: 'prepscore',
+    name: 'Prep Score',
+    desc: 'Your readiness score across water, food, medical, shelter, power, comms, documents, and tools -- computed from what you\'ve already tracked in Inventory Manager.',
+    component: null,
+  },
   {
     id: 'inventory',
     name: 'Inventory Manager',
@@ -1120,7 +1301,9 @@ export default function Tools() {
             <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>{active.name}</h2>
             <button onClick={() => setSelected(null)} style={{ background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-muted)', padding: '4px 10px', fontSize: '12px', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>Close</button>
           </div>
-          {active.component}
+          {active.id === 'prepscore'
+            ? <PrepScore onOpenInventory={() => setSelected('inventory')} />
+            : active.component}
         </div>
       )}
     </div>
