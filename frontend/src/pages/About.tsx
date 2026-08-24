@@ -79,6 +79,14 @@ export default function About() {
           }}>
             Join the Community
           </Link>
+          <a href="https://discord.gg/NWNZBDsJKc" target="_blank" rel="noopener noreferrer" style={{
+            fontFamily: 'var(--font-display)', fontWeight: 500, fontSize: '14px',
+            letterSpacing: '0.02em', padding: '12px 24px', borderRadius: '8px',
+            border: '1px solid var(--color-border)', color: 'var(--color-muted)',
+            display: 'inline-flex', alignItems: 'center', gap: '8px', textDecoration: 'none',
+          }}>
+            Join our Discord
+          </a>
         </div>
       </section>
 
