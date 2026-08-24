@@ -38,7 +38,18 @@ const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 
 const app = Fastify({
-  logger: true,
+  logger: {
+    serializers: {
+      // Privacy commitment: don't log search queries. The default req
+      // serializer logs the full URL including query string, which for
+      // GET /search?q=... would put whatever someone searched for straight
+      // into the logs. Strip the query string on that one path only.
+      req(request) {
+        const url = request.url?.startsWith('/search?') ? '/search?[redacted]' : request.url
+        return { method: request.method, url, hostname: request.hostname, remoteAddress: request.ip, remotePort: request.socket?.remotePort }
+      },
+    },
+  },
   bodyLimit: 1_048_576, // 1 MB max JSON body
 })
 
@@ -55,7 +66,9 @@ await app.register(cors, {
 })
 
 await app.register(rateLimit, {
-  global: false,
+  global: true,
+  max: 100,
+  timeWindow: '1 minute',
   keyGenerator: (req) => req.headers['x-forwarded-for']?.split(',')[0].trim() ?? req.ip,
 })
 
@@ -323,7 +336,10 @@ app.delete('/guides/:id/noise', { onRequest: [app.authenticate] }, async (req, r
   return { vote: null, ...rows[0] }
 })
 
-app.post('/guides', { onRequest: [app.authenticate] }, async (req, reply) => {
+app.post('/guides', {
+  onRequest: [app.authenticate],
+  config: { rateLimit: { max: 10, timeWindow: '1 hour' } },
+}, async (req, reply) => {
   if (await checkMuted(pool, req.user.id, reply)) return
   const { title, body, category, region } = req.body
   if (!title?.trim() || !body?.trim() || !category?.trim()) {

@@ -232,9 +232,25 @@ function EmptySlot({ editMode, onClick, isMoveTarget }: { editMode: boolean; onC
 
 function AlertsContent({ data }: { data: DashData }) {
   const { open: openDrawer } = useContextDrawer()
-  const pinned = data.events
+  const severeOrExtreme = data.events
     .filter(e => e.severity === 'Extreme' || e.severity === 'Severe')
     .sort((a, b) => (a.severity === 'Extreme' ? 0 : 1) - (b.severity === 'Extreme' ? 0 : 1))
+
+  // Cap how many alerts from the same source+event_type can occupy the panel.
+  // MeteoAlarm in particular issues one alert per French department for the
+  // same weather system (e.g. "Vigilance orange orages"), so a single storm
+  // can otherwise fill every visible slot with near-duplicates of itself and
+  // crowd out everything else -- a USGS earthquake, an NWS tornado warning.
+  const seenCounts = new Map<string, number>()
+  const pinned: typeof severeOrExtreme = []
+  const overflow: typeof severeOrExtreme = []
+  for (const e of severeOrExtreme) {
+    const key = `${e.source}:${e.event_type}`
+    const count = seenCounts.get(key) ?? 0
+    seenCounts.set(key, count + 1)
+    ;(count < 3 ? pinned : overflow).push(e)
+  }
+  pinned.push(...overflow)
 
   if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
 

@@ -19,12 +19,12 @@ export async function searchRoutes(app, { pool }) {
           LEFT(p.body, 200) AS snippet,
           p.upvote_count, p.created_at,
           u.username,
-          ts_rank(to_tsvector('english', p.title || ' ' || p.body), query) AS rank
+          ts_rank(p.search_vector, query) AS rank
         FROM posts p
         LEFT JOIN users u ON u.id = p.user_id,
         to_tsquery('english', $1) query
         WHERE p.is_removed = FALSE
-          AND to_tsvector('english', p.title || ' ' || p.body) @@ query
+          AND p.search_vector @@ query
         ORDER BY rank DESC, p.created_at DESC
         LIMIT 10
       `, [tsq]),
@@ -35,12 +35,12 @@ export async function searchRoutes(app, { pool }) {
           LEFT(g.body, 200) AS snippet,
           g.signal_count, g.created_at,
           u.username,
-          ts_rank(to_tsvector('english', g.title || ' ' || g.body), query) AS rank
+          ts_rank(g.search_vector, query) AS rank
         FROM guides g
         LEFT JOIN users u ON u.id = g.user_id,
         to_tsquery('english', $1) query
         WHERE g.is_removed = FALSE
-          AND to_tsvector('english', g.title || ' ' || g.body) @@ query
+          AND g.search_vector @@ query
         ORDER BY rank DESC, g.signal_count DESC
         LIMIT 10
       `, [tsq]),
