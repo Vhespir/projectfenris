@@ -1,6 +1,5 @@
 import Parser from 'rss-parser'
 import pg from 'pg'
-import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -112,8 +111,8 @@ async function storeFeedItem(item, feed, skipFilter = false) {
   if (!skipFilter && !isRelevant(title, summary)) return 0
 
   const { rowCount } = await pool.query(`
-    INSERT INTO news_items (source, title, url, summary, category, region, published_at, slug)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO news_items (source, title, url, summary, category, region, published_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
     ON CONFLICT (url) WHERE url IS NOT NULL DO NOTHING
   `, [
     feed.source,
@@ -123,7 +122,6 @@ async function storeFeedItem(item, feed, skipFilter = false) {
     feed.category,
     feed.region,
     item.pubDate ? new Date(item.pubDate).toISOString() : null,
-    generateSlug(),
   ])
   return rowCount
 }

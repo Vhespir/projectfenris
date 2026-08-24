@@ -1,6 +1,5 @@
 import axios from 'axios'
 import pg from 'pg'
-import { generateSlug } from '../lib/slugs.js'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
@@ -53,8 +52,8 @@ export async function fetchEPA() {
       const { rowCount } = await pool.query(`
         INSERT INTO disaster_events
           (source, event_type, title, severity, geometry, properties,
-           external_id, starts_at, slug)
-        VALUES ($1, $2, $3, $4, ST_GeomFromGeoJSON($5), $6, $7, $8, $9)
+           external_id, starts_at)
+        VALUES ($1, $2, $3, $4, ST_GeomFromGeoJSON($5), $6, $7, $8)
         ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO NOTHING
       `, [
         'epa',
@@ -65,7 +64,6 @@ export async function fetchEPA() {
         JSON.stringify(r),
         externalId,
         r.UTC ? `${r.UTC}:00Z` : null,
-        generateSlug(),
       ])
 
       stored += rowCount

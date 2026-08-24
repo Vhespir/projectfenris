@@ -98,6 +98,22 @@ services:
       - "traefik.http.routers.fenris-frontend-https.tls.certresolver=letsencrypt"
       - "traefik.http.routers.fenris-frontend-https.service=fenris-frontend"
       - "traefik.http.services.fenris-frontend.loadbalancer.server.port=3000"
+      # www.projectfenris.com -> permanent redirect to bare apex on both entrypoints.
+      # The session cookie has no explicit domain, so it's pinned to whichever
+      # exact host the browser used -- serving both hosts live (no redirect)
+      # would silently log users out depending on which one they landed on.
+      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.regex=^https?://www\\.projectfenris\\.com/(.*)"
+      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.replacement=https://projectfenris.com/$${1}"
+      - "traefik.http.middlewares.fenris-www-redirect.redirectregex.permanent=true"
+      - "traefik.http.routers.fenris-www-http.rule=Host(`www.projectfenris.com`)"
+      - "traefik.http.routers.fenris-www-http.entrypoints=http"
+      - "traefik.http.routers.fenris-www-http.middlewares=fenris-www-redirect"
+      - "traefik.http.routers.fenris-www-http.service=fenris-frontend"
+      - "traefik.http.routers.fenris-www-https.rule=Host(`www.projectfenris.com`)"
+      - "traefik.http.routers.fenris-www-https.entrypoints=https"
+      - "traefik.http.routers.fenris-www-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fenris-www-https.middlewares=fenris-www-redirect"
+      - "traefik.http.routers.fenris-www-https.service=fenris-frontend"
 
 volumes:
   postgres-data:
