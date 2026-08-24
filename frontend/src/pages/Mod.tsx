@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -56,6 +56,27 @@ interface ModUser {
   created_at: string
   region_state: string | null
   region_county: string | null
+  is_banned: boolean
+  banned_at: string | null
+  banned_reason: string | null
+  muted_until: string | null
+}
+
+interface ActivityItem {
+  id: number
+  title?: string
+  body?: string
+  post_type?: string
+  is_removed?: boolean
+  created_at: string
+}
+
+interface ModActivity {
+  user: { id: number; username: string; email: string }
+  posts: ActivityItem[]
+  comments: ActivityItem[]
+  guides: ActivityItem[]
+  aars: ActivityItem[]
 }
 
 function timeAgo(iso: string) {
@@ -89,10 +110,26 @@ export default function Mod() {
   const [users, setUsers] = useState<ModUser[]>([])
   const [loading, setLoading] = useState(false)
 
+  const [selectedPosts, setSelectedPosts] = useState<Set<number>>(new Set())
+  const [selectedComments, setSelectedComments] = useState<Set<number>>(new Set())
+  const [selectedUsers, setSelectedUsers] = useState<Set<number>>(new Set())
+
+  const [activityUserId, setActivityUserId] = useState<number | null>(null)
+  const [activity, setActivity] = useState<ModActivity | null>(null)
+  const [activityLoading, setActivityLoading] = useState(false)
+
   useEffect(() => {
     if (!user) { navigate('/login'); return }
     if (!user.is_moderator) { navigate('/403'); return }
   }, [user])
+
+  useEffect(() => {
+    setSelectedPosts(new Set())
+    setSelectedComments(new Set())
+    setSelectedUsers(new Set())
+    setActivityUserId(null)
+    setActivity(null)
+  }, [tab, status])
 
   useEffect(() => {
     if (!user?.is_moderator) return
@@ -165,6 +202,129 @@ export default function Mod() {
     }
   }
 
+  function toggle(set: Set<number>, setFn: (s: Set<number>) => void, id: number) {
+    const next = new Set(set)
+    next.has(id) ? next.delete(id) : next.add(id)
+    setFn(next)
+  }
+
+  function toggleAll(ids: number[], set: Set<number>, setFn: (s: Set<number>) => void) {
+    setFn(set.size === ids.length ? new Set() : new Set(ids))
+  }
+
+  async function banUser(id: number) {
+    const reason = window.prompt('Ban reason (optional, shown to no one but moderators):') ?? undefined
+    const res = await fetch(`/api/mod/users/${id}/ban`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    })
+    if (res.ok) {
+      const updated = await res.json()
+      setUsers(us => us.map(u => u.id === id ? { ...u, ...updated } : u))
+    } else {
+      const { error } = await res.json().catch(() => ({ error: 'Ban failed' }))
+      window.alert(error)
+    }
+  }
+
+  async function unbanUser(id: number) {
+    const res = await fetch(`/api/mod/users/${id}/unban`, { method: 'PATCH' })
+    if (res.ok) {
+      const updated = await res.json()
+      setUsers(us => us.map(u => u.id === id ? { ...u, ...updated, banned_at: null, banned_reason: null } : u))
+    }
+  }
+
+  async function muteUser(id: number) {
+    const input = window.prompt('Mute for how many hours? (e.g. 24)', '24')
+    if (!input) return
+    const hours = Number(input)
+    if (!hours || hours <= 0) return window.alert('Enter a positive number of hours')
+    const res = await fetch(`/api/mod/users/${id}/mute`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours }),
+    })
+    if (res.ok) {
+      const updated = await res.json()
+      setUsers(us => us.map(u => u.id === id ? { ...u, ...updated } : u))
+    } else {
+      const { error } = await res.json().catch(() => ({ error: 'Mute failed' }))
+      window.alert(error)
+    }
+  }
+
+  async function unmuteUser(id: number) {
+    const res = await fetch(`/api/mod/users/${id}/unmute`, { method: 'PATCH' })
+    if (res.ok) {
+      const updated = await res.json()
+      setUsers(us => us.map(u => u.id === id ? { ...u, ...updated } : u))
+    }
+  }
+
+  async function deleteUser(id: number, username: string) {
+    if (!window.confirm(
+      `Permanently delete "${username}"? This cannot be undone. Their votes, messages, and ` +
+      `notifications are deleted with them; their posts/comments/guides survive but show no author.`
+    )) return
+    const res = await fetch(`/api/mod/users/${id}`, { method: 'DELETE' })
+    if (res.ok) {
+      setUsers(us => us.filter(u => u.id !== id))
+      if (activityUserId === id) { setActivityUserId(null); setActivity(null) }
+    } else {
+      const { error } = await res.json().catch(() => ({ error: 'Delete failed' }))
+      window.alert(error)
+    }
+  }
+
+  async function viewActivity(id: number) {
+    if (activityUserId === id) { setActivityUserId(null); setActivity(null); return }
+    setActivityUserId(id)
+    setActivityLoading(true)
+    const res = await fetch(`/api/mod/users/${id}/activity`)
+    if (res.ok) setActivity(await res.json())
+    setActivityLoading(false)
+  }
+
+  async function bulkRemovePosts() {
+    if (!selectedPosts.size) return
+    if (!window.confirm(`Remove ${selectedPosts.size} post(s)?`)) return
+    const ids = [...selectedPosts]
+    await fetch('/api/mod/posts/bulk-remove', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+    })
+    setPosts(ps => ps.map(p => ids.includes(p.id) ? { ...p, is_removed: true } : p))
+    setSelectedPosts(new Set())
+  }
+
+  async function bulkRemoveComments() {
+    if (!selectedComments.size) return
+    if (!window.confirm(`Remove ${selectedComments.size} comment(s)?`)) return
+    const ids = [...selectedComments]
+    await fetch('/api/mod/comments/bulk-remove', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+    })
+    setComments(cs => cs.map(c => ids.includes(c.id) ? { ...c, is_removed: true } : c))
+    setSelectedComments(new Set())
+  }
+
+  async function bulkBanUsers() {
+    if (!selectedUsers.size) return
+    const reason = window.prompt(`Ban reason for ${selectedUsers.size} account(s) (optional):`) ?? undefined
+    const ids = [...selectedUsers]
+    const res = await fetch('/api/mod/users/bulk-ban', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids, reason }),
+    })
+    if (res.ok) {
+      setUsers(us => us.map(u => ids.includes(u.id)
+        ? { ...u, is_banned: true, banned_at: new Date().toISOString(), banned_reason: reason ?? null }
+        : u
+      ))
+      setSelectedUsers(new Set())
+    }
+  }
+
   if (!user?.is_moderator) return null
 
   const inputStyle = {
@@ -202,6 +362,15 @@ export default function Mod() {
     background: active ? 'rgba(34,197,94,0.08)' : 'transparent',
     color: active ? 'var(--color-accent)' : 'var(--color-subtle)',
   })
+
+  const bulkBar = {
+    display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px',
+    marginBottom: '12px', borderRadius: '6px', background: 'rgba(34,197,94,0.06)',
+    border: '1px solid rgba(34,197,94,0.2)', fontSize: '12px', fontFamily: 'var(--font-mono)',
+    color: 'var(--color-muted)',
+  }
+
+  const checkboxCell = { padding: '10px 12px', borderBottom: '1px solid var(--color-border)', width: '32px' }
 
   const cellStyle = {
     padding: '10px 12px', borderBottom: '1px solid var(--color-border)',
@@ -262,6 +431,28 @@ export default function Mod() {
         </div>
       )}
 
+      {tab === 'posts' && selectedPosts.size > 0 && (
+        <div style={bulkBar}>
+          <span>{selectedPosts.size} selected</span>
+          <button style={actionBtn(true)} onClick={bulkRemovePosts}>Remove selected</button>
+          <button style={{ ...actionBtn(false), marginLeft: 'auto' }} onClick={() => setSelectedPosts(new Set())}>Clear</button>
+        </div>
+      )}
+      {tab === 'comments' && selectedComments.size > 0 && (
+        <div style={bulkBar}>
+          <span>{selectedComments.size} selected</span>
+          <button style={actionBtn(true)} onClick={bulkRemoveComments}>Remove selected</button>
+          <button style={{ ...actionBtn(false), marginLeft: 'auto' }} onClick={() => setSelectedComments(new Set())}>Clear</button>
+        </div>
+      )}
+      {tab === 'users' && selectedUsers.size > 0 && (
+        <div style={bulkBar}>
+          <span>{selectedUsers.size} selected</span>
+          <button style={actionBtn(true)} onClick={bulkBanUsers}>Ban selected</button>
+          <button style={{ ...actionBtn(false), marginLeft: 'auto' }} onClick={() => setSelectedUsers(new Set())}>Clear</button>
+        </div>
+      )}
+
       {loading ? (
         <div style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '13px', padding: '40px 0', textAlign: 'center' }}>
           Loading...
@@ -274,6 +465,13 @@ export default function Mod() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
+                  <th style={headCell}>
+                    <input
+                      type="checkbox"
+                      checked={posts.length > 0 && selectedPosts.size === posts.length}
+                      onChange={() => toggleAll(posts.map(p => p.id), selectedPosts, setSelectedPosts)}
+                    />
+                  </th>
                   <th style={headCell}>Type</th>
                   <th style={headCell}>Title</th>
                   <th style={headCell}>Author</th>
@@ -284,9 +482,16 @@ export default function Mod() {
               </thead>
               <tbody>
                 {posts.length === 0 ? (
-                  <tr><td colSpan={6} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No posts</td></tr>
+                  <tr><td colSpan={7} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No posts</td></tr>
                 ) : posts.map(p => (
                   <tr key={p.id} style={{ opacity: p.is_removed ? 0.5 : 1 }}>
+                    <td style={checkboxCell}>
+                      <input
+                        type="checkbox"
+                        checked={selectedPosts.has(p.id)}
+                        onChange={() => toggle(selectedPosts, setSelectedPosts, p.id)}
+                      />
+                    </td>
                     <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
                       <span style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '3px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-muted)' }}>
                         {POST_TYPE_LABEL[p.post_type] ?? p.post_type}
@@ -333,6 +538,13 @@ export default function Mod() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
+                  <th style={headCell}>
+                    <input
+                      type="checkbox"
+                      checked={comments.length > 0 && selectedComments.size === comments.length}
+                      onChange={() => toggleAll(comments.map(c => c.id), selectedComments, setSelectedComments)}
+                    />
+                  </th>
                   <th style={headCell}>Author</th>
                   <th style={headCell}>Comment</th>
                   <th style={headCell}>On</th>
@@ -343,12 +555,19 @@ export default function Mod() {
               </thead>
               <tbody>
                 {comments.length === 0 ? (
-                  <tr><td colSpan={6} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No comments</td></tr>
+                  <tr><td colSpan={7} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No comments</td></tr>
                 ) : comments.map(c => {
                   const parentLink = c.post_id ? `/post/${c.post_id}` : c.guide_id ? `/compendium/${c.guide_id}` : null
                   const parentTitle = c.post_title ?? c.guide_title ?? 'Unknown'
                   return (
                     <tr key={c.id} style={{ opacity: c.is_removed ? 0.5 : 1 }}>
+                      <td style={checkboxCell}>
+                        <input
+                          type="checkbox"
+                          checked={selectedComments.has(c.id)}
+                          onChange={() => toggle(selectedComments, setSelectedComments, c.id)}
+                        />
+                      </td>
                       <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
                         {c.username ? (
                           <Link to={`/profile/${c.username}`} style={{ color: 'var(--color-muted)', textDecoration: 'none' }}>
@@ -458,6 +677,13 @@ export default function Mod() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr>
+                  <th style={headCell}>
+                    <input
+                      type="checkbox"
+                      checked={users.length > 0 && selectedUsers.size === users.length}
+                      onChange={() => toggleAll(users.map(u => u.id), selectedUsers, setSelectedUsers)}
+                    />
+                  </th>
                   <th style={headCell}>Username</th>
                   <th style={headCell}>Email</th>
                   <th style={headCell}>Region</th>
@@ -465,50 +691,132 @@ export default function Mod() {
                   <th style={headCell}>Joined</th>
                   <th style={headCell}>Trusted</th>
                   <th style={headCell}>Mod</th>
+                  <th style={headCell}>Status</th>
+                  <th style={headCell}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {users.length === 0 ? (
-                  <tr><td colSpan={7} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No users found</td></tr>
-                ) : users.map(u => (
-                  <tr key={u.id}>
-                    <td style={cellStyle}>
-                      <Link to={`/profile/${u.username}`} style={{ color: 'var(--color-accent)', textDecoration: 'none', fontWeight: 500 }}>
-                        {u.username}
-                      </Link>
-                    </td>
-                    <td style={{ ...cellStyle, color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-                      {u.email}
-                    </td>
-                    <td style={{ ...cellStyle, color: 'var(--color-subtle)', fontSize: '11px' }}>
-                      {[u.region_county, u.region_state].filter(Boolean).join(', ') || '-'}
-                    </td>
-                    <td style={{ ...cellStyle, fontFamily: 'var(--font-mono)', color: 'var(--color-muted)' }}>
-                      {u.reputation}
-                    </td>
-                    <td style={{ ...cellStyle, whiteSpace: 'nowrap', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-                      {timeAgo(u.created_at)}
-                    </td>
-                    <td style={cellStyle}>
-                      {u.id !== user.id ? (
-                        <button style={flagBtn(u.is_trusted)} onClick={() => toggleUserFlag(u.id, 'is_trusted', u.is_trusted)}>
-                          {u.is_trusted ? 'Yes' : 'No'}
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '10px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>{u.is_trusted ? 'Yes' : 'No'}</span>
-                      )}
-                    </td>
-                    <td style={cellStyle}>
-                      {u.id !== user.id ? (
-                        <button style={flagBtn(u.is_moderator)} onClick={() => toggleUserFlag(u.id, 'is_moderator', u.is_moderator)}>
-                          {u.is_moderator ? 'Yes' : 'No'}
-                        </button>
-                      ) : (
-                        <span style={{ fontSize: '10px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>You</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                  <tr><td colSpan={10} style={{ ...cellStyle, textAlign: 'center', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No users found</td></tr>
+                ) : users.map(u => {
+                  const isMuted = !!u.muted_until && new Date(u.muted_until) > new Date()
+                  return (
+                  <Fragment key={u.id}>
+                    <tr style={{ opacity: u.is_banned ? 0.5 : 1 }}>
+                      <td style={checkboxCell}>
+                        {u.id !== user.id && (
+                          <input
+                            type="checkbox"
+                            checked={selectedUsers.has(u.id)}
+                            onChange={() => toggle(selectedUsers, setSelectedUsers, u.id)}
+                          />
+                        )}
+                      </td>
+                      <td style={cellStyle}>
+                        <Link to={`/profile/${u.username}`} style={{ color: 'var(--color-accent)', textDecoration: 'none', fontWeight: 500 }}>
+                          {u.username}
+                        </Link>
+                      </td>
+                      <td style={{ ...cellStyle, color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                        {u.email}
+                      </td>
+                      <td style={{ ...cellStyle, color: 'var(--color-subtle)', fontSize: '11px' }}>
+                        {[u.region_county, u.region_state].filter(Boolean).join(', ') || '-'}
+                      </td>
+                      <td style={{ ...cellStyle, fontFamily: 'var(--font-mono)', color: 'var(--color-muted)' }}>
+                        {u.reputation}
+                      </td>
+                      <td style={{ ...cellStyle, whiteSpace: 'nowrap', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                        {timeAgo(u.created_at)}
+                      </td>
+                      <td style={cellStyle}>
+                        {u.id !== user.id ? (
+                          <button style={flagBtn(u.is_trusted)} onClick={() => toggleUserFlag(u.id, 'is_trusted', u.is_trusted)}>
+                            {u.is_trusted ? 'Yes' : 'No'}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '10px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>{u.is_trusted ? 'Yes' : 'No'}</span>
+                        )}
+                      </td>
+                      <td style={cellStyle}>
+                        {u.id !== user.id ? (
+                          <button style={flagBtn(u.is_moderator)} onClick={() => toggleUserFlag(u.id, 'is_moderator', u.is_moderator)}>
+                            {u.is_moderator ? 'Yes' : 'No'}
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: '10px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>You</span>
+                        )}
+                      </td>
+                      <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+                        {u.is_banned && (
+                          <span title={u.banned_reason ?? undefined} style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '3px', background: 'rgba(239,68,68,0.1)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.25)', marginRight: '4px' }}>
+                            banned
+                          </span>
+                        )}
+                        {isMuted && (
+                          <span title={`Muted until ${new Date(u.muted_until as string).toLocaleString()}`} style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '3px', background: 'rgba(245,158,11,0.1)', color: 'var(--color-warning)', border: '1px solid rgba(245,158,11,0.25)' }}>
+                            muted
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...cellStyle, whiteSpace: 'nowrap' }}>
+                        {u.id === user.id ? (
+                          <span style={{ fontSize: '10px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>-</span>
+                        ) : (
+                          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            <button style={actionBtn(false)} onClick={() => viewActivity(u.id)}>
+                              {activityUserId === u.id ? 'Hide' : 'Activity'}
+                            </button>
+                            {u.is_banned ? (
+                              <button style={actionBtn(false)} onClick={() => unbanUser(u.id)}>Unban</button>
+                            ) : (
+                              <button style={actionBtn(true)} onClick={() => banUser(u.id)}>Ban</button>
+                            )}
+                            {isMuted ? (
+                              <button style={actionBtn(false)} onClick={() => unmuteUser(u.id)}>Unmute</button>
+                            ) : (
+                              <button style={actionBtn(false)} onClick={() => muteUser(u.id)}>Mute</button>
+                            )}
+                            <button style={actionBtn(true)} onClick={() => deleteUser(u.id, u.username)}>Delete</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                    {activityUserId === u.id && (
+                      <tr>
+                        <td colSpan={10} style={{ ...cellStyle, background: 'var(--color-bg)' }}>
+                          {activityLoading ? (
+                            <span style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>Loading activity...</span>
+                          ) : activity && activity.user.id === u.id ? (
+                            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: '16px' }}>
+                              {([
+                                ['Posts', activity.posts],
+                                ['Comments', activity.comments],
+                                ['Guides', activity.guides],
+                                ['AARs', activity.aars],
+                              ] as [string, ActivityItem[]][]).map(([label, items]) => (
+                                <div key={label}>
+                                  <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
+                                    {label} ({items.length})
+                                  </div>
+                                  {items.length === 0 ? (
+                                    <div style={{ fontSize: '11px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>none</div>
+                                  ) : items.slice(0, 10).map(item => (
+                                    <div key={item.id} style={{ fontSize: '11px', color: item.is_removed ? 'var(--color-danger)' : 'var(--color-muted)', marginBottom: '4px' }}>
+                                      {(item.title ?? item.body ?? '').slice(0, 50)}
+                                      <span style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}> &middot; {timeAgo(item.created_at)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           )}

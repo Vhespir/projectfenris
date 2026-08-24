@@ -1,4 +1,5 @@
 import { emitToUser } from '../lib/socket.js'
+import { checkMuted } from '../lib/moderation.js'
 
 export async function commentRoutes(app, { pool }) {
   const commentSelect = `
@@ -18,6 +19,7 @@ export async function commentRoutes(app, { pool }) {
   })
 
   app.post('/posts/:id/comments', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (await checkMuted(pool, req.user.id, reply)) return
     const { body } = req.body ?? {}
     if (!body?.trim()) return reply.code(400).send({ error: 'Comment cannot be empty' })
     if (body.trim().length > 2000) return reply.code(400).send({ error: 'Comment must be 2,000 characters or fewer' })
@@ -67,6 +69,7 @@ export async function commentRoutes(app, { pool }) {
   })
 
   app.post('/guides/:id/comments', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (await checkMuted(pool, req.user.id, reply)) return
     const { body } = req.body ?? {}
     if (!body?.trim()) return reply.code(400).send({ error: 'Comment cannot be empty' })
     if (body.trim().length > 2000) return reply.code(400).send({ error: 'Comment must be 2,000 characters or fewer' })

@@ -1,4 +1,5 @@
 import { emitToChannel, emitToUser } from '../lib/socket.js'
+import { checkMuted } from '../lib/moderation.js'
 
 const CATEGORY_TO_CHANNEL = {
   'Gear and Equipment': 'gear',
@@ -116,6 +117,7 @@ export async function postRoutes(app, { pool }) {
 
   // Create post
   app.post('/posts', { preHandler: [app.authenticate] }, async (req, reply) => {
+    if (await checkMuted(pool, req.user.id, reply)) return
     const { post_type, category, title, body, location_label, latitude, longitude } = req.body ?? {}
 
     if (!post_type || !category || !title || !body) {

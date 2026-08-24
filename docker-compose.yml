@@ -78,6 +78,26 @@ services:
     networks:
       - fenris-network
 
+  # Local nightly pg_dump, kept 14 days, pruned automatically. Local-disk only --
+  # protects against a bad deploy / volume mixup, not against losing the VPS
+  # itself. See backup/backup.sh for the off-site (B2) follow-up note.
+  backup:
+    build:
+      context: ./backup
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - backup-data:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - fenris-network
+
   frontend:
     build:
       context: ./frontend
@@ -124,12 +144,40 @@ services:
       - "traefik.http.routers.fenris-www-https.service=fenris-frontend"
 
 volumes:
+  # CAUTION, read before touching either of these two:
+  #
+  # Coolify's Persistent Storage tab shows the volumes it's actually tracking
+  # for this app as `<app-id>_postgres-data` / `<app-id>_uploads-data` -- NOT
+  # the `projectfenris-site_*` names declared below via `external`/`name`.
+  # The site runs fine on real, accumulated data regardless, which means
+  # Coolify is computing its own volume name for Docker-Compose-buildpack
+  # apps and is not actually honoring this override. Do not trust the `name:`
+  # values here as ground truth for what's really mounted.
+  #
+  # This matters because of what happened on 2026-05-30: this app's very
+  # first Coolify deploy started against a brand-new empty volume, and
+  # nothing from the prior bare-metal deployment was ever migrated into it --
+  # all 22 migrations ran fresh in one ~250ms burst that day, and no account
+  # or post from before that date survived. It probably wasn't a name
+  # mismatch so much as: standing up a new Coolify app just doesn't import
+  # data from an unrelated old volume on its own, and that step was never
+  # done by hand either.
+  #
+  # Before changing anything below, or moving this app to a new Coolify
+  # instance/server, get ground truth first: `docker volume ls` and
+  # `docker inspect <db container>` on the actual host, not this file and
+  # not the Coolify UI. Whatever you do, never delete/recreate the Coolify
+  # application resource itself without a fresh pg_dump in hand first --
+  # that's what actually severs the binding to real data.
   postgres-data:
     external: true
     name: projectfenris-site_postgres-data
   uploads-data:
     external: true
     name: projectfenris-site_uploads-data
+  # Not external, on purpose -- this one's brand new, so there's nothing
+  # pre-existing to reattach to. Compose manages it normally.
+  backup-data:
 
 networks:
   fenris-network:

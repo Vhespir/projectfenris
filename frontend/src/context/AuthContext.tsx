@@ -7,6 +7,7 @@ interface User {
   reputation: number
   is_trusted: boolean
   is_moderator: boolean
+  muted_until?: string | null
   region_state: string | null
   region_county: string | null
   avatar_url: string | null

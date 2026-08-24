@@ -23,6 +23,7 @@ import { aarRoutes } from './routes/aar.js'
 import { frequencyRoutes } from './routes/frequencies.js'
 import { inventoryRoutes } from './routes/inventory.js'
 import { refRoutes } from './routes/refs.js'
+import { checkMuted } from './lib/moderation.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
 
@@ -81,6 +82,14 @@ app.decorate('authenticate', async (req, reply) => {
     await req.jwtVerify()
   } catch {
     reply.code(401).send({ error: 'Unauthorized' })
+    return
+  }
+  // Re-checked on every authenticated request, not just at login, so a ban
+  // takes effect immediately even against an already-issued session cookie.
+  const { rows } = await pool.query('SELECT is_banned, banned_reason FROM users WHERE id = $1', [req.user.id])
+  if (rows[0]?.is_banned) {
+    reply.clearCookie('session', { path: '/' })
+    reply.code(403).send({ error: `This account has been banned${rows[0].banned_reason ? `: ${rows[0].banned_reason}` : '.'}` })
   }
 })
 
@@ -315,6 +324,7 @@ app.delete('/guides/:id/noise', { onRequest: [app.authenticate] }, async (req, r
 })
 
 app.post('/guides', { onRequest: [app.authenticate] }, async (req, reply) => {
+  if (await checkMuted(pool, req.user.id, reply)) return
   const { title, body, category, region } = req.body
   if (!title?.trim() || !body?.trim() || !category?.trim()) {
     return reply.code(400).send({ error: 'title, body, and category are required' })
