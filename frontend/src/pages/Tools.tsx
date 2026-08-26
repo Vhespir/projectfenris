@@ -20,6 +20,28 @@ const resultRow = (label: string, value: string, accent = false) => (
   </div>
 )
 
+// Shared math behind the water and calorie targets, used both by the
+// standalone calculators and by the per-kit targets panel in Inventory
+// Manager, so the two never drift apart.
+function computeWaterTargets(people: number, pets: number, days: number, heat: boolean, active: boolean) {
+  const dailyPerPerson = (heat ? 1.5 : 1) * (active ? 1.5 : 1)
+  const totalPeople = people + pets * 0.5
+  const totalGallons = Math.ceil(totalPeople * days * dailyPerPerson)
+  const drinkingGallons = Math.ceil(totalPeople * days * 0.5 * (heat ? 1.5 : 1) * (active ? 1.5 : 1))
+  return { totalGallons, drinkingGallons }
+}
+
+type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'heavy'
+const ACTIVITY_CALORIES: Record<ActivityLevel, number> = { sedentary: 1800, light: 2200, moderate: 2600, heavy: 3200 }
+
+function computeCalorieTargets(adults: number, children: number, elderly: number, activity: ActivityLevel) {
+  const adultCals = ACTIVITY_CALORIES[activity]
+  const childCals = Math.round(adultCals * 0.65)
+  const elderlyCals = Math.round(adultCals * 0.85)
+  const dailyTotal = adults * adultCals + children * childCals + elderly * elderlyCals
+  return { adultCals, childCals, elderlyCals, dailyTotal }
+}
+
 // ─── Water Storage Calculator ──────────────────────────────────────────────────
 
 function WaterCalculator() {
@@ -30,10 +52,7 @@ function WaterCalculator() {
   const [heat, setHeat] = useState(false)
   const [active, setActive] = useState(false)
 
-  const dailyPerPerson = (heat ? 1.5 : 1) * (active ? 1.5 : 1)
-  const totalPeople = people + pets * 0.5
-  const totalGallons = Math.ceil(totalPeople * days * dailyPerPerson)
-  const drinkingGallons = Math.ceil(totalPeople * days * 0.5 * (heat ? 1.5 : 1) * (active ? 1.5 : 1))
+  const { totalGallons, drinkingGallons } = computeWaterTargets(people, pets, days, heat, active)
   const containers55 = Math.ceil(totalGallons / 55)
   const containers5 = Math.ceil(totalGallons / 5)
 
@@ -77,13 +96,9 @@ function CaloricCalculator() {
   const [adults, setAdults] = useState(2)
   const [children, setChildren] = useState(0)
   const [elderly, setElderly] = useState(0)
-  const [activity, setActivity] = useState<'sedentary' | 'light' | 'moderate' | 'heavy'>('moderate')
+  const [activity, setActivity] = useState<ActivityLevel>('moderate')
 
-  const activityMap = { sedentary: 1800, light: 2200, moderate: 2600, heavy: 3200 }
-  const adultCals = activityMap[activity]
-  const childCals = Math.round(adultCals * 0.65)
-  const elderlyCals = Math.round(adultCals * 0.85)
-  const dailyTotal = adults * adultCals + children * childCals + elderly * elderlyCals
+  const { adultCals, childCals, elderlyCals, dailyTotal } = computeCalorieTargets(adults, children, elderly, activity)
   const cal72h = dailyTotal * 3
   const cal2wk = dailyTotal * 14
   const cal30d = dailyTotal * 30
@@ -357,7 +372,57 @@ function removeLocalItems(kitId: string): void {
   try { localStorage.removeItem(`fenris_kit_items_${kitId}`) } catch {}
 }
 
-function InventoryManager() {
+// Per-kit-type context: water and food targets for the caches that are
+// meant to sustain a household, plus the documents checklist for the one
+// kit type people actually keep documents in, plus the generator
+// calculator for the one kit type it applies to. Everything reads the
+// same household numbers Inventory Manager already tracks.
+const SUSTAINMENT_TYPES: KitType[] = ['home_cache', 'bob', 'ghb', 'inch']
+
+function KitTargetsPanel({ h }: { h: Household }) {
+  const { totalGallons } = computeWaterTargets(h.people, h.pets, h.days, false, false)
+  const { dailyTotal } = computeCalorieTargets(h.people, 0, 0, 'moderate')
+  const totalCalories = dailyTotal * h.days
+  return (
+    <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', padding: '14px 16px', borderRadius: '8px', background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.18)', marginBottom: '20px' }}>
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: '#93C5FD' }}>{totalGallons} gal</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '2px' }}>Water target</div>
+      </div>
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 700, color: '#93C5FD' }}>{totalCalories.toLocaleString()} cal</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: '2px' }}>Food target</div>
+      </div>
+      <div style={{ marginLeft: 'auto', alignSelf: 'center', fontFamily: 'var(--font-body)', fontSize: '11px', color: 'var(--color-subtle)', maxWidth: '260px' }}>
+        For {h.people} people{h.pets > 0 ? `, ${h.pets} pets` : ''} over {h.days} days. Estimate at moderate activity, no heat adjustment. Adjust household size above.
+      </div>
+    </div>
+  )
+}
+
+function CollapsiblePanel({ label, children }: { label: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginBottom: '20px' }}>
+      <button onClick={() => setOpen(v => !v)} style={{
+        display: 'flex', alignItems: 'center', gap: '8px', width: '100%', textAlign: 'left',
+        padding: '10px 14px', borderRadius: '8px', cursor: 'pointer',
+        border: '1px solid var(--color-border)', background: open ? 'var(--color-bg)' : 'transparent',
+        color: 'var(--color-text)', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600,
+      }}>
+        <span style={{ color: 'var(--color-accent)', fontSize: '11px' }}>{open ? '▾' : '▸'}</span>
+        {label}
+      </button>
+      {open && (
+        <div style={{ padding: '18px', border: '1px solid var(--color-border)', borderTop: 'none', borderRadius: '0 0 8px 8px' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) {
   const isMobile = useIsMobile()
   const { user } = useAuth()
 
@@ -384,8 +449,22 @@ function InventoryManager() {
   const [suggestDone, setSuggestDone] = useState(false)
 
   const activeKit = kits.find(k => k.id === activeKitId) ?? null
+  const visibleKits = typeFilter ? kits.filter(k => k.type === typeFilter) : kits
   const items = activeKitId ? (kitItemsMap[activeKitId] ?? []) : []
   const today = new Date().toISOString().slice(0, 10)
+
+  // Jumping between cache tabs: auto-open the one kit of that type if
+  // there's exactly one, otherwise fall back to the (filtered) list, and
+  // don't leave a kit from a different type showing under this tab.
+  useEffect(() => {
+    if (!typeFilter) return
+    const matching = kits.filter(k => k.type === typeFilter)
+    if (matching.length === 1) {
+      setActiveKitId(matching[0].id)
+    } else if (activeKitId && !matching.some(k => k.id === activeKitId)) {
+      setActiveKitId(null)
+    }
+  }, [typeFilter, kits]) // eslint-disable-line react-hooks/exhaustive-deps
   const soonDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
   const h: Household = { people: household.people || 2, pets: household.pets || 0, days: household.days || 14 }
 
@@ -685,6 +764,29 @@ function InventoryManager() {
           {totalCostCents > 0 && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>${(totalCostCents / 100).toFixed(2)}</span>}
         </div>
 
+        {/* Context: water/food targets, documents, generator, whichever apply to this cache type */}
+        {SUSTAINMENT_TYPES.includes(activeKit.type) && (
+          <>
+            <KitTargetsPanel h={h} />
+            <CollapsiblePanel label="Full water storage calculator">
+              <WaterCalculator />
+            </CollapsiblePanel>
+            <CollapsiblePanel label="Full caloric needs calculator">
+              <CaloricCalculator />
+            </CollapsiblePanel>
+          </>
+        )}
+        {activeKit.type === 'home_cache' && (
+          <CollapsiblePanel label="Important documents checklist">
+            <DocumentChecklist />
+          </CollapsiblePanel>
+        )}
+        {activeKit.type === 'power_cache' && (
+          <CollapsiblePanel label="Generator and fuel calculator">
+            <GeneratorCalculator />
+          </CollapsiblePanel>
+        )}
+
         {/* Action bar */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px', alignItems: 'center' }}>
           <button onClick={() => { setShowCatalog(v => !v); setCatalogSearch(''); setCatalogCat(''); setAddedInCatalog(new Set()) }}
@@ -898,10 +1000,10 @@ function InventoryManager() {
       {/* Header bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
         <div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '2px' }}>Your Kits</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>{kits.length} kit{kits.length !== 1 ? 's' : ''} &nbsp;·&nbsp; {user ? 'synced' : 'local only'}</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '2px' }}>{typeFilter ? KIT_META[typeFilter].label : 'Your Kits'}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>{visibleKits.length} kit{visibleKits.length !== 1 ? 's' : ''} &nbsp;·&nbsp; {user ? 'synced' : 'local only'}</div>
         </div>
-        <button onClick={() => setShowNewKit(v => !v)} style={{ padding: '7px 16px', borderRadius: '4px', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer', border: 'none', background: showNewKit ? 'var(--color-border)' : 'var(--color-accent)', color: showNewKit ? 'var(--color-muted)' : '#0A0A0A' }}>
+        <button onClick={() => { setNewKitForm(f => ({ ...f, type: typeFilter ?? f.type })); setShowNewKit(v => !v) }} style={{ padding: '7px 16px', borderRadius: '4px', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer', border: 'none', background: showNewKit ? 'var(--color-border)' : 'var(--color-accent)', color: showNewKit ? 'var(--color-muted)' : '#0A0A0A' }}>
           {showNewKit ? 'Cancel' : '+ New kit'}
         </button>
       </div>
@@ -909,22 +1011,24 @@ function InventoryManager() {
       {/* New kit form */}
       {showNewKit && (
         <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '20px', marginBottom: '24px' }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '11px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '14px' }}>New Kit</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '11px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '14px' }}>New {typeFilter ? KIT_META[typeFilter].label : 'Kit'}</div>
           <div style={{ marginBottom: '14px' }}>
             <label style={labelStyle}>Kit name</label>
             <input value={newKitForm.name} onChange={e => setNewKitForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Primary BOB, IFAK - Car, Home Cache" style={inputStyle} onKeyDown={e => e.key === 'Enter' && createKit()} autoFocus />
           </div>
-          <div style={{ marginBottom: '14px' }}>
-            <label style={labelStyle}>Type</label>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {(Object.entries(KIT_META) as [KitType, typeof KIT_META[KitType]][]).map(([type, meta]) => (
-                <button key={type} type="button" onClick={() => setNewKitForm(f => ({ ...f, type }))} style={{ padding: '5px 12px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer', fontWeight: newKitForm.type === type ? 700 : 400, border: `1px solid ${newKitForm.type === type ? meta.color : 'var(--color-border)'}`, background: newKitForm.type === type ? `${meta.color}18` : 'transparent', color: newKitForm.type === type ? meta.color : 'var(--color-muted)' }}>
-                  {meta.short}
-                </button>
-              ))}
+          {!typeFilter && (
+            <div style={{ marginBottom: '14px' }}>
+              <label style={labelStyle}>Type</label>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {(Object.entries(KIT_META) as [KitType, typeof KIT_META[KitType]][]).map(([type, meta]) => (
+                  <button key={type} type="button" onClick={() => setNewKitForm(f => ({ ...f, type }))} style={{ padding: '5px 12px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer', fontWeight: newKitForm.type === type ? 700 : 400, border: `1px solid ${newKitForm.type === type ? meta.color : 'var(--color-border)'}`, background: newKitForm.type === type ? `${meta.color}18` : 'transparent', color: newKitForm.type === type ? meta.color : 'var(--color-muted)' }}>
+                    {meta.short}
+                  </button>
+                ))}
+              </div>
+              <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-subtle)', marginTop: '6px' }}>{KIT_META[newKitForm.type].label}</div>
             </div>
-            <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-subtle)', marginTop: '6px' }}>{KIT_META[newKitForm.type].label}</div>
-          </div>
+          )}
           <div style={{ marginBottom: '16px' }}>
             <label style={labelStyle}>Location label (optional)</label>
             <input value={newKitForm.location_label} onChange={e => setNewKitForm(f => ({ ...f, location_label: e.target.value }))} placeholder="e.g. Master closet, Truck, Hall closet" style={inputStyle} />
@@ -936,15 +1040,18 @@ function InventoryManager() {
       )}
 
       {/* Empty state */}
-      {kits.length === 0 && !showNewKit && (
+      {visibleKits.length === 0 && !showNewKit && (
         <div style={{ textAlign: 'center', padding: '48px 24px', border: '1px dashed var(--color-border)', borderRadius: '8px', marginBottom: '24px' }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>No kits yet</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>
+            {typeFilter ? `No ${KIT_META[typeFilter].label} kit yet` : 'No kits yet'}
+          </div>
           <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', lineHeight: 1.6, marginBottom: '20px' }}>
-            Create named kits for your EDC, Bug Out Bag, IFAK, Home Cache, and more.
-            <br />Each kit tracks its own items, readiness, weight, and cost.
+            {typeFilter
+              ? <>Create one and it tracks its own items, readiness, weight, and cost.</>
+              : <>Create named kits for your EDC, Bug Out Bag, IFAK, Home Cache, and more.<br />Each kit tracks its own items, readiness, weight, and cost.</>}
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            {(['bob', 'ifak', 'edc', 'home_cache', 'vehicle'] as KitType[]).map(type => (
+            {(typeFilter ? [typeFilter] : (['bob', 'ifak', 'edc', 'home_cache', 'vehicle'] as KitType[])).map(type => (
               <button key={type} onClick={() => { setNewKitForm({ name: KIT_META[type].label, type, location_label: '' }); setShowNewKit(true) }}
                 style={{ padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-display)', cursor: 'pointer', border: `1px solid ${KIT_META[type].color}50`, background: `${KIT_META[type].color}12`, color: KIT_META[type].color }}>
                 + {KIT_META[type].label}
@@ -955,9 +1062,9 @@ function InventoryManager() {
       )}
 
       {/* Kit cards grid */}
-      {kits.length > 0 && (
+      {visibleKits.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px', marginBottom: '24px' }}>
-          {kits.map(kit => {
+          {visibleKits.map(kit => {
             const meta = KIT_META[kit.type] ?? KIT_META.custom
             const kitItems = kitItemsMap[kit.id]
             const r = kitItems ? kitReadiness(kitItems) : null
@@ -1396,50 +1503,53 @@ function DocumentChecklist() {
 }
 
 // ─── Inventory Hub ──────────────────────────────────────────────────────────
-// Everything that reads or feeds household prep data lives here as one tool
-// with internal tabs, instead of as separate top-level tools: kits, Prep
-// Score, the water and caloric calculators, the generator calculator, and
-// the documents checklist.
+// The tabs are the caches themselves (EDC, BOB, Home Cache, and so on), not
+// separate tools. Open a cache and it already knows how much water and food
+// it should hold, and Home Cache and Power Cache carry the documents
+// checklist and the generator calculator right there, because that's where
+// those actually belong. Overview and All Kits are the only two tabs that
+// aren't a single cache type.
 
-type HubTab = 'kits' | 'prepscore' | 'water' | 'calories' | 'generator' | 'documents'
+type HubTab = 'overview' | 'all' | KitType
 
-const HUB_TABS: { key: HubTab; label: string }[] = [
-  { key: 'kits',      label: 'Kits' },
-  { key: 'prepscore', label: 'Prep Score' },
-  { key: 'water',     label: 'Water' },
-  { key: 'calories',  label: 'Calories' },
-  { key: 'generator', label: 'Generator' },
-  { key: 'documents', label: 'Documents' },
-]
+const KIT_TYPE_ORDER: KitType[] = ['edc', 'bob', 'ghb', 'inch', 'vehicle', 'home_cache', 'ifak', 'trauma', 'med_kit', 'comms', 'power_cache', 'custom']
 
 function InventoryHub() {
-  const [tab, setTab] = useState<HubTab>('kits')
+  const [tab, setTab] = useState<HubTab>('overview')
+
+  const tabs: { key: HubTab; label: string; color?: string }[] = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'all', label: 'All Kits' },
+    ...KIT_TYPE_ORDER.map(type => ({ key: type as HubTab, label: KIT_META[type].short, color: KIT_META[type].color })),
+  ]
 
   return (
     <div>
       <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '24px', borderBottom: '1px solid var(--color-border)', paddingBottom: '14px' }}>
-        {HUB_TABS.map(t => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            style={{
-              padding: '6px 14px', borderRadius: '5px', fontSize: '13px', fontFamily: 'var(--font-display)',
-              fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer',
-              border: `1px solid ${tab === t.key ? 'var(--color-accent)' : 'var(--color-border)'}`,
-              background: tab === t.key ? 'rgba(34,197,94,0.1)' : 'transparent',
-              color: tab === t.key ? 'var(--color-accent)' : 'var(--color-muted)',
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
+        {tabs.map(t => {
+          const active = tab === t.key
+          const color = t.color ?? 'var(--color-accent)'
+          return (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              title={t.color ? KIT_META[t.key as KitType].label : undefined}
+              style={{
+                padding: '6px 14px', borderRadius: '5px', fontSize: '13px', fontFamily: 'var(--font-display)',
+                fontWeight: active ? 600 : 400, cursor: 'pointer',
+                border: `1px solid ${active ? color : 'var(--color-border)'}`,
+                background: active ? `${color}18` : 'transparent',
+                color: active ? color : 'var(--color-muted)',
+              }}
+            >
+              {t.label}
+            </button>
+          )
+        })}
       </div>
-      {tab === 'kits' && <InventoryManager />}
-      {tab === 'prepscore' && <PrepScore onOpenInventory={() => setTab('kits')} />}
-      {tab === 'water' && <WaterCalculator />}
-      {tab === 'calories' && <CaloricCalculator />}
-      {tab === 'generator' && <GeneratorCalculator />}
-      {tab === 'documents' && <DocumentChecklist />}
+      {tab === 'overview' && <PrepScore onOpenInventory={() => setTab('all')} />}
+      {tab === 'all' && <InventoryManager />}
+      {tab !== 'overview' && tab !== 'all' && <InventoryManager typeFilter={tab as KitType} />}
     </div>
   )
 }
@@ -1450,7 +1560,7 @@ const TOOLS = [
   {
     id: 'inventory',
     name: 'Inventory Manager',
-    desc: 'Kits, Prep Score, water and caloric needs, generator and fuel planning, and your documents checklist, all in one place, all reading from the same household data.',
+    desc: 'One tab per cache: EDC, BOB, GHB, INCH, Vehicle, Home Cache, IFAK, Trauma, Med Kit, Comms, Power Cache. Each one already knows your water and food targets, and Home Cache and Power Cache carry the documents checklist and generator calculator built in.',
     component: <InventoryHub />,
   },
 ]
