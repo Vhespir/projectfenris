@@ -32,8 +32,6 @@ export default function Footer() {
             { href: '/community', label: 'Community' },
             { href: '/compendium', label: 'Compendium' },
             { href: '/tools', label: 'Tools' },
-            { href: '/community?channel=aar', label: 'After Action Reports' },
-            { href: '/frequencies', label: 'Frequencies' },
             { href: '/about', label: 'About' },
           ].map(link => (
             <Link

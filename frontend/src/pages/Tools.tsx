@@ -1033,7 +1033,7 @@ function InventoryManager() {
 // ─── Prep Score ─────────────────────────────────────────────────────────────
 // Reads what's already tracked in Inventory Manager (same kits/items, same
 // server sync + local-guest fallback) and turns it into one readiness number
-// plus a per-pillar breakdown. No new backend, no re-entering data -- the
+// plus a per-pillar breakdown. No new backend, no re-entering data. The
 // point is tying data that already exists in the platform together instead
 // of asking for it twice.
 
@@ -1128,7 +1128,7 @@ function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
           Nothing tracked yet
         </div>
         <div style={{ fontFamily: 'var(--font-body)', fontSize: '14px', color: 'var(--color-muted)', marginBottom: '20px', maxWidth: '420px', margin: '0 auto 20px' }}>
-          Prep Score reads directly from Inventory Manager -- build a kit there and this fills in on its own.
+          Prep Score reads directly from Inventory Manager. Build a kit there and this fills in on its own.
         </div>
         <button onClick={onOpenInventory} style={{ padding: '10px 20px', borderRadius: '6px', border: 'none', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
           Open Inventory Manager
@@ -1155,7 +1155,7 @@ function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
             {expiredCount > 0 && <> &middot; <span style={{ color: 'var(--color-danger)' }}>{expiredCount} expired</span></>}
           </div>
           <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-subtle)', marginTop: '4px' }}>
-            Scored for a household of {household.people} people{household.pets > 0 ? `, ${household.pets} pets` : ''}, {household.days}-day target -- adjust in Inventory Manager.
+            Scored for a household of {household.people} people{household.pets > 0 ? `, ${household.pets} pets` : ''}, {household.days}-day target. Adjust in Inventory Manager.
           </div>
         </div>
       </div>
@@ -1192,7 +1192,7 @@ function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
           <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', lineHeight: 1.7, marginBottom: '10px' }}>
             {weakPillars.slice(0, 3).map(p => (
               <div key={p.pillar}>
-                {p.pillar} -- {p.tracked === 0 ? 'nothing tracked yet' : `${p.ok} of ${p.tracked} items at target`}
+                {p.pillar}: {p.tracked === 0 ? 'nothing tracked yet' : `${p.ok} of ${p.tracked} items at target`}
               </div>
             ))}
           </div>
@@ -1219,7 +1219,7 @@ const APPLIANCE_LOADS: { label: string; watts: number }[] = [
   { label: 'Lights (several)',          watts: 200 },
   { label: 'Phone / laptop charging',   watts: 50 },
   { label: 'Wifi router + modem',       watts: 30 },
-  { label: 'Chest/window TV',           watts: 150 },
+  { label: 'TV',                        watts: 150 },
 ]
 
 function GeneratorCalculator() {
@@ -1239,7 +1239,7 @@ function GeneratorCalculator() {
   const loadFraction = genWatts > 0 ? Math.min(load / genWatts, 1) : 0
   // Rough rule of thumb: a gas generator burns roughly 0.75 gal/hr per 10kW of
   // rated output at 50% load, scaling with actual load fraction. Real
-  // consumption varies a lot by generator and fuel type -- this is a planning
+  // consumption varies a lot by generator and fuel type. This is a planning
   // estimate, not a spec.
   const gph = Math.max(0.15, (genWatts / 10000) * 0.75 * Math.max(loadFraction, 0.3))
   const runtimePerTank = tankGal / gph
@@ -1289,137 +1289,8 @@ function GeneratorCalculator() {
         {resultRow(`Fuel for ${days} day${days !== 1 ? 's' : ''}`, `~${totalFuelNeeded.toFixed(1)} gal`, true)}
         {resultRow('Tanks to have on hand', `${tanksNeeded} tank${tanksNeeded !== 1 ? 's' : ''}`)}
         <div style={{ marginTop: '16px', padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
-          Rule-of-thumb estimate, not a spec. Check your generator's actual fuel consumption curve if you have it, and store fuel legally and safely -- most home storage limits apply per container and per property.
+          Rule-of-thumb estimate, not a spec. Check your generator's actual fuel consumption curve if you have it, and store fuel legally and safely. Most home storage limits apply per container and per property.
         </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Communications Plan ───────────────────────────────────────────────────────
-
-interface CommsMember { id: string; name: string; phone: string; notes: string }
-interface CommsPlanData {
-  outOfAreaContact: string; outOfAreaPhone: string
-  primaryMeeting: string; secondaryMeeting: string; outOfAreaMeeting: string
-  radioChannels: string
-  members: CommsMember[]
-}
-
-const EMPTY_COMMS_PLAN: CommsPlanData = {
-  outOfAreaContact: '', outOfAreaPhone: '',
-  primaryMeeting: '', secondaryMeeting: '', outOfAreaMeeting: '',
-  radioChannels: '',
-  members: [],
-}
-
-function loadCommsPlan(): CommsPlanData {
-  try {
-    const raw = localStorage.getItem('fenris_comms_plan')
-    return raw ? { ...EMPTY_COMMS_PLAN, ...JSON.parse(raw) } : EMPTY_COMMS_PLAN
-  } catch { return EMPTY_COMMS_PLAN }
-}
-
-function CommsPlan() {
-  const isMobile = useIsMobile()
-  const [plan, setPlan] = useState<CommsPlanData>(loadCommsPlan)
-  const [copied, setCopied] = useState(false)
-
-  useEffect(() => {
-    try { localStorage.setItem('fenris_comms_plan', JSON.stringify(plan)) } catch {}
-  }, [plan])
-
-  function set<K extends keyof CommsPlanData>(key: K, value: CommsPlanData[K]) {
-    setPlan(prev => ({ ...prev, [key]: value }))
-  }
-  function addMember() {
-    set('members', [...plan.members, { id: `m_${Date.now()}`, name: '', phone: '', notes: '' }])
-  }
-  function updateMember(id: string, field: keyof CommsMember, value: string) {
-    set('members', plan.members.map(m => m.id === id ? { ...m, [field]: value } : m))
-  }
-  function removeMember(id: string) {
-    set('members', plan.members.filter(m => m.id !== id))
-  }
-
-  function asText() {
-    const lines = [
-      'FAMILY COMMUNICATIONS PLAN', '',
-      `Out-of-area contact: ${plan.outOfAreaContact || '(not set)'} -- ${plan.outOfAreaPhone || '(no phone)'}`, '',
-      `Primary meeting point (near home): ${plan.primaryMeeting || '(not set)'}`,
-      `Secondary meeting point (neighborhood/regional): ${plan.secondaryMeeting || '(not set)'}`,
-      `Out-of-area meeting point: ${plan.outOfAreaMeeting || '(not set)'}`, '',
-      `Radio channels to monitor: ${plan.radioChannels || '(not set)'}`, '',
-      'Family members:',
-      ...(plan.members.length
-        ? plan.members.map(m => `  - ${m.name || '(name)'} -- ${m.phone || '(phone)'}${m.notes ? ` -- ${m.notes}` : ''}`)
-        : ['  (none added)']),
-    ]
-    return lines.join('\n')
-  }
-
-  function copyPlan() {
-    navigator.clipboard.writeText(asText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div style={{ padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
-        Pick an out-of-area contact -- local calls can fail when everyone's trying to use the network at once, but a long-distance call often gets through. Saved to this browser only.
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
-        <div><label style={labelStyle}>Out-of-area contact name</label><input value={plan.outOfAreaContact} onChange={e => set('outOfAreaContact', e.target.value)} style={inputStyle} placeholder="Aunt Carol" /></div>
-        <div><label style={labelStyle}>Their phone</label><input value={plan.outOfAreaPhone} onChange={e => set('outOfAreaPhone', e.target.value)} style={inputStyle} placeholder="(555) 555-5555" /></div>
-      </div>
-
-      <div>
-        <label style={labelStyle}>Primary meeting point (right outside home)</label>
-        <input value={plan.primaryMeeting} onChange={e => set('primaryMeeting', e.target.value)} style={inputStyle} placeholder="e.g. the mailbox at the end of the driveway" />
-      </div>
-      <div>
-        <label style={labelStyle}>Secondary meeting point (if you can't get home)</label>
-        <input value={plan.secondaryMeeting} onChange={e => set('secondaryMeeting', e.target.value)} style={inputStyle} placeholder="e.g. the library on Main St" />
-      </div>
-      <div>
-        <label style={labelStyle}>Out-of-area meeting point (if the region is evacuated)</label>
-        <input value={plan.outOfAreaMeeting} onChange={e => set('outOfAreaMeeting', e.target.value)} style={inputStyle} placeholder="e.g. Aunt Carol's house" />
-      </div>
-      <div>
-        <label style={labelStyle}>Radio channels / frequencies to monitor</label>
-        <input value={plan.radioChannels} onChange={e => set('radioChannels', e.target.value)} style={inputStyle} placeholder="e.g. GMRS ch. 1, county fire dispatch -- see the Frequency Database" />
-        <Link to="/frequencies" style={{ display: 'inline-block', marginTop: '5px', fontSize: '11px', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', textDecoration: 'none' }}>
-          Look up local frequencies →
-        </Link>
-      </div>
-
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <label style={{ ...labelStyle, marginBottom: 0 }}>Family members</label>
-          <button onClick={addMember} style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-accent)', fontSize: '12px', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>+ Add</button>
-        </div>
-        {plan.members.length === 0 && (
-          <div style={{ fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No members added yet.</div>
-        )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {plan.members.map(m => (
-            <div key={m.id} style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr auto', gap: '8px', alignItems: 'center' }}>
-              <input value={m.name} onChange={e => updateMember(m.id, 'name', e.target.value)} style={inputStyle} placeholder="Name" />
-              <input value={m.phone} onChange={e => updateMember(m.id, 'phone', e.target.value)} style={inputStyle} placeholder="Phone" />
-              <input value={m.notes} onChange={e => updateMember(m.id, 'notes', e.target.value)} style={inputStyle} placeholder="Notes (school, workplace...)" />
-              <button onClick={() => removeMember(m.id)} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: '4px 8px' }}>×</button>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: '10px' }}>
-        <button onClick={copyPlan} style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid var(--color-border)', background: copied ? 'rgba(34,197,94,0.1)' : 'transparent', color: copied ? 'var(--color-accent)' : 'var(--color-muted)', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
-          {copied ? 'Copied!' : 'Copy plan as text'}
-        </button>
-        <button onClick={() => window.print()} style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
-          Print
-        </button>
       </div>
     </div>
   )
@@ -1481,7 +1352,7 @@ function DocumentChecklist() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       <div style={{ padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
-        Track what you have a physical copy of (in a go-bag or fireproof box) versus a digital copy of (encrypted drive, cloud folder). Saved to this browser only -- nothing is uploaded.
+        Track what you have a physical copy of (in a go-bag or fireproof box) versus a digital copy of (encrypted drive, cloud folder). Saved to this browser only, nothing is uploaded.
       </div>
 
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-muted)' }}>
@@ -1524,50 +1395,63 @@ function DocumentChecklist() {
   )
 }
 
+// ─── Inventory Hub ──────────────────────────────────────────────────────────
+// Everything that reads or feeds household prep data lives here as one tool
+// with internal tabs, instead of as separate top-level tools: kits, Prep
+// Score, the water and caloric calculators, the generator calculator, and
+// the documents checklist.
+
+type HubTab = 'kits' | 'prepscore' | 'water' | 'calories' | 'generator' | 'documents'
+
+const HUB_TABS: { key: HubTab; label: string }[] = [
+  { key: 'kits',      label: 'Kits' },
+  { key: 'prepscore', label: 'Prep Score' },
+  { key: 'water',     label: 'Water' },
+  { key: 'calories',  label: 'Calories' },
+  { key: 'generator', label: 'Generator' },
+  { key: 'documents', label: 'Documents' },
+]
+
+function InventoryHub() {
+  const [tab, setTab] = useState<HubTab>('kits')
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '24px', borderBottom: '1px solid var(--color-border)', paddingBottom: '14px' }}>
+        {HUB_TABS.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            style={{
+              padding: '6px 14px', borderRadius: '5px', fontSize: '13px', fontFamily: 'var(--font-display)',
+              fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer',
+              border: `1px solid ${tab === t.key ? 'var(--color-accent)' : 'var(--color-border)'}`,
+              background: tab === t.key ? 'rgba(34,197,94,0.1)' : 'transparent',
+              color: tab === t.key ? 'var(--color-accent)' : 'var(--color-muted)',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {tab === 'kits' && <InventoryManager />}
+      {tab === 'prepscore' && <PrepScore onOpenInventory={() => setTab('kits')} />}
+      {tab === 'water' && <WaterCalculator />}
+      {tab === 'calories' && <CaloricCalculator />}
+      {tab === 'generator' && <GeneratorCalculator />}
+      {tab === 'documents' && <DocumentChecklist />}
+    </div>
+  )
+}
+
 // ─── Tool registry ─────────────────────────────────────────────────────────────
 
 const TOOLS = [
   {
-    id: 'prepscore',
-    name: 'Prep Score',
-    desc: 'Your readiness score across water, food, medical, shelter, power, comms, documents, and tools -- computed from what you\'ve already tracked in Inventory Manager.',
-    component: null,
-  },
-  {
     id: 'inventory',
     name: 'Inventory Manager',
-    desc: 'Build and track named kits: EDC, BOB, IFAK, Home Cache, Vehicle, Trauma, Comms, and more. Catalog search, suggested builds, weight and cost tracking.',
-    component: <InventoryManager />,
-  },
-  {
-    id: 'water',
-    name: 'Water Storage Calculator',
-    desc: 'How much water you need stored for your household size, duration, climate, and activity level.',
-    component: <WaterCalculator />,
-  },
-  {
-    id: 'calories',
-    name: 'Caloric Needs Calculator',
-    desc: 'Daily caloric requirements by household composition and activity level. Includes 30-day storage estimates.',
-    component: <CaloricCalculator />,
-  },
-  {
-    id: 'generator',
-    name: 'Generator & Fuel Calculator',
-    desc: 'Pick what you\'ll run, check it against your generator\'s capacity, and see how much fuel you\'ll actually need.',
-    component: <GeneratorCalculator />,
-  },
-  {
-    id: 'comms_plan',
-    name: 'Communications Plan',
-    desc: 'Out-of-area contact, meeting points, and radio channels -- filled in once, saved to this browser, exportable as text.',
-    component: <CommsPlan />,
-  },
-  {
-    id: 'doc_checklist',
-    name: 'Important Documents Checklist',
-    desc: 'Track which critical documents you have physical and digital copies of -- IDs, insurance, medical, property, legal.',
-    component: <DocumentChecklist />,
+    desc: 'Kits, Prep Score, water and caloric needs, generator and fuel planning, and your documents checklist, all in one place, all reading from the same household data.',
+    component: <InventoryHub />,
   },
 ]
 
@@ -1632,9 +1516,7 @@ export default function Tools() {
             <h2 style={{ fontFamily: 'var(--font-display)', fontSize: '18px', fontWeight: 700, color: 'var(--color-text)' }}>{active.name}</h2>
             <button onClick={() => setSelected(null)} style={{ background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-muted)', padding: '4px 10px', fontSize: '12px', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>Close</button>
           </div>
-          {active.id === 'prepscore'
-            ? <PrepScore onOpenInventory={() => setSelected('inventory')} />
-            : active.component}
+          {active.component}
         </div>
       )}
     </div>
