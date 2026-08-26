@@ -5,7 +5,7 @@ import {
   WebMapServiceImageryProvider, GeoJsonDataSource, CustomDataSource,
   ColorMaterialProperty, ConstantProperty, ScreenSpaceEventType,
   JulianDate, Credit, HeightReference, defined, Entity, Cartesian2,
-  Ion, createWorldTerrainAsync,
+  Ion, createWorldTerrainAsync, BoundingSphere, HeadingPitchRange,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { DisasterEvent, AirTrafficFilters, FireTimeRange } from './MapEventLayer'
@@ -297,6 +297,25 @@ export default function CesiumMap({
           setSidebar({ html: desc })
           return
         }
+      }
+      // Cesium's clustering renders a badge for the group but does nothing
+      // when you click it, the clustered entities live on picked.id as an
+      // array, not a single Entity, so the branch above never catches it.
+      // Zoom into the cluster's bounding sphere instead, same as clicking a
+      // cluster on a normal map does.
+      if (defined(picked) && Array.isArray(picked.id)) {
+        const positions = (picked.id as Entity[])
+          .map(e => e.position?.getValue(JulianDate.now()))
+          .filter((p): p is Cartesian3 => !!p)
+        if (positions.length > 0) {
+          const sphere = BoundingSphere.fromPoints(positions)
+          viewer.camera.flyToBoundingSphere(sphere, {
+            duration: 1,
+            offset: new HeadingPitchRange(0, -Math.PI / 2, Math.max(sphere.radius * 3, 50000)),
+          })
+        }
+        setSidebar(null)
+        return
       }
       setSidebar(null)
     }, ScreenSpaceEventType.LEFT_CLICK)

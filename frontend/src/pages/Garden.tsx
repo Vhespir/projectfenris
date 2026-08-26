@@ -276,6 +276,7 @@ function BedList({ onSelect }: { onSelect: (bed: Bed) => void }) {
   const [beds, setBeds] = useState<Bed[] | null>(null)
   const [showNew, setShowNew] = useState(false)
   const [form, setForm] = useState({ name: '', location_label: '', size_sqft: '' })
+  const [confirmDelete, setConfirmDelete] = useState<Bed | null>(null)
 
   function load() { api<Bed[]>('/api/garden/beds').then(setBeds) }
   useEffect(load, [])
@@ -291,6 +292,12 @@ function BedList({ onSelect }: { onSelect: (bed: Bed) => void }) {
       setShowNew(false)
       setForm({ name: '', location_label: '', size_sqft: '' })
     }
+  }
+
+  async function deleteBed(id: string) {
+    await api(`/api/garden/beds/${id}`, { method: 'DELETE' })
+    setBeds(prev => (prev ?? []).filter(b => b.id !== id))
+    setConfirmDelete(null)
   }
 
   return (
@@ -325,17 +332,37 @@ function BedList({ onSelect }: { onSelect: (bed: Bed) => void }) {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
           {(beds ?? []).map(bed => (
-            <button key={bed.id} onClick={() => onSelect(bed)} style={{ textAlign: 'left', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '6px' }}
+            <div key={bed.id} style={{ position: 'relative', background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px' }}
               onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-accent)' }}
               onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
             >
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>{bed.name}</div>
-              {bed.location_label && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>{bed.location_label}</div>}
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)' }}>
-                {bed.active_crop_count} active crop{bed.active_crop_count !== 1 ? 's' : ''} &middot; {bed.crop_count} planted total
-              </div>
-            </button>
+              <button onClick={() => onSelect(bed)} style={{ textAlign: 'left', background: 'transparent', border: 'none', padding: '16px', paddingRight: '32px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>{bed.name}</div>
+                {bed.location_label && <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>{bed.location_label}</div>}
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)' }}>
+                  {bed.active_crop_count} active crop{bed.active_crop_count !== 1 ? 's' : ''} &middot; {bed.crop_count} planted total
+                </div>
+              </button>
+              <button onClick={() => setConfirmDelete(bed)} title="Delete bed" style={{ position: 'absolute', top: '10px', right: '10px', background: 'transparent', border: 'none', color: 'var(--color-subtle)', cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: '2px 4px' }}>
+                x
+              </button>
+            </div>
           ))}
+        </div>
+      )}
+
+      {confirmDelete && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '10px', padding: '28px', maxWidth: '360px', width: '100%' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 700, color: 'var(--color-text)', marginBottom: '10px' }}>Delete this bed?</div>
+            <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', marginBottom: '20px', lineHeight: 1.6 }}>
+              "{confirmDelete.name}" and every crop and harvest logged in it will be permanently removed. This cannot be undone.
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => deleteBed(confirmDelete.id)} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: 'none', background: '#EF4444', color: '#fff', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Delete</button>
+              <button onClick={() => setConfirmDelete(null)} style={{ flex: 1, padding: '9px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)', fontFamily: 'var(--font-display)', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

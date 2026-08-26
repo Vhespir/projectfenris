@@ -1726,7 +1726,7 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchData() {
       const [evs, nws, psts] = await Promise.all([
-        fetch('/api/events?limit=500').then(r => r.json()).catch(() => []),
+        fetch('/api/events?limit=3000').then(r => r.json()).catch(() => []),
         fetch('/api/news?limit=100').then(r => r.json()).catch(() => []),
         fetch('/api/posts?limit=50').then(r => r.json()).catch(() => []),
       ])
