@@ -277,11 +277,19 @@ export async function externalRoutes(app) {
   app.get('/external/drought', async (_req, reply) => {
     try {
       const data = await withCache('drought', 24 * 60 * 60_000, async () => {
-        const today = new Date().toISOString().slice(0, 10)
-        const url = `https://droughtmonitor.unl.edu/DmData/GISData.aspx?mode=csv&aoi=us&date=${today}`
-        const res = await fetch(url, { headers: H, signal: AbortSignal.timeout(20_000) })
-        if (!res.ok) throw new Error(`DroughtMonitor ${res.status}`)
-        const text = await res.text()
+        // The Drought Monitor only publishes for the current data cycle (as of
+        // Tuesdays), and its CSV endpoint returns an empty 200 for any date it
+        // hasn't caught up to yet -- which is "today" more often than not. Walk
+        // backward until we hit a date it actually has data for.
+        let text = ''
+        for (let daysBack = 0; daysBack <= 10 && !text.trim(); daysBack++) {
+          const date = new Date(Date.now() - daysBack * 86400000).toISOString().slice(0, 10)
+          const url = `https://droughtmonitor.unl.edu/DmData/GISData.aspx?mode=csv&aoi=us&date=${date}`
+          const res = await fetch(url, { headers: H, signal: AbortSignal.timeout(20_000) })
+          if (!res.ok) continue
+          text = await res.text()
+        }
+        if (!text.trim()) throw new Error('no data in last 10 days')
         const lines = text.trim().split('\n').filter(l => !l.startsWith('MapDate'))
         const conus = lines.find(l => l.includes(',CONUS,')) || lines[0]
         if (!conus) throw new Error('no data')

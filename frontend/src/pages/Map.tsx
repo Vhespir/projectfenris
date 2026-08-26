@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useLocation } from 'react-router-dom'
 import CesiumMap from '../components/CesiumMap'
 import type { DisasterEvent, AirTrafficFilters, AltitudeBand, FireTimeRange } from '../components/MapEventLayer'
@@ -57,7 +57,7 @@ const LEGEND_SEVERITY = [
 
 function LegendShape({ shape, color }: { shape: string; color: string }) {
   const s = 14
-  const shapes: Record<string, JSX.Element> = {
+  const shapes: Record<string, ReactElement> = {
     circle:   <circle cx="7" cy="7" r="5.5" fill={color} />,
     triangle: <polygon points="7,1 13,13 1,13" fill={color} />,
     pentagon: <polygon points="7,1 13,5 11,12 3,12 1,5" fill={color} />,

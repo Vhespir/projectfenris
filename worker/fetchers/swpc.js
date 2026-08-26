@@ -81,7 +81,11 @@ export async function fetchSWPC() {
 
       const title = extractTitle(alert.message, alert.product_id)
       const summary = extractSummary(alert.message)
-      const url = `https://services.swpc.noaa.gov/alerts/${alert.product_id}`
+      // services.swpc.noaa.gov/alerts/{product_id} 404s -- there's no per-alert
+      // human page. Link to NOAA's real alerts dashboard instead, with a unique
+      // fragment (product_id + issue time) so the `url` uniqueness constraint
+      // used for dedup doesn't collapse every alert into one row.
+      const url = `https://www.swpc.noaa.gov/products/alerts-watches-and-warnings#${encodeURIComponent(alert.product_id)}-${encodeURIComponent(alert.issue_datetime ?? '')}`
 
       const { rowCount } = await pool.query(`
         INSERT INTO news_items (source, title, url, summary, category, region, published_at)

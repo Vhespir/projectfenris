@@ -1241,12 +1241,6 @@ const TOOL_LINKS = [
     desc: 'Police, fire, EMS, ham radio, NOAA weather, and GMRS frequencies by county. Community-maintained reference.',
     link: '/frequencies',
   },
-  {
-    id: 'aar',
-    name: 'After Action Reports',
-    desc: 'Real emergencies documented by community members. What worked, what failed, what they wish they had.',
-    link: '/community?channel=aar',
-  },
 ]
 
 export default function Tools() {

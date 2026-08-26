@@ -93,7 +93,8 @@ export function WeatherAlertLayer() {
 
       if (layerRef.current) { map.removeLayer(layerRef.current); layerRef.current = null }
 
-      layerRef.current = L.geoJSON({ type: 'FeatureCollection', features }, {
+      const collection: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features }
+      layerRef.current = L.geoJSON(collection, {
         style: f => alertStyle(f?.properties?.severity ?? 'Minor'),
         onEachFeature: (f, layer) => {
           const p = f.properties

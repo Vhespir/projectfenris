@@ -63,15 +63,6 @@ export default function Frequencies() {
 
   useEffect(() => { load() }, [stateFilter, catFilter, search])
 
-  // Group by state + category for display
-  const grouped: Record<string, Frequency[]> = {}
-  for (const f of freqs) {
-    const key = `${f.state}___${f.category}`
-    if (!grouped[key]) grouped[key] = []
-    grouped[key].push(f)
-  }
-  const groupKeys = Object.keys(grouped).sort()
-
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: isMobile ? '16px' : '32px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '24px', gap: '16px', flexWrap: 'wrap' }}>
