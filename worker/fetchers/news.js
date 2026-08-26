@@ -138,7 +138,7 @@ export async function fetchNews() {
       }
       feedCount++
     } catch (err) {
-      // silently skip unavailable feeds
+      console.error(`News: ${feed.source} (${feed.url}) failed: ${err.message}`)
     }
   }
 
@@ -150,7 +150,7 @@ export async function fetchNews() {
       }
       feedCount++
     } catch (err) {
-      // silently skip unavailable feeds
+      console.error(`News: ${feed.source} (${feed.url}) failed: ${err.message}`)
     }
   }
 

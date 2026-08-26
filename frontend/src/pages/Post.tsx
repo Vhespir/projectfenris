@@ -14,6 +14,13 @@ interface Post {
   location_label: string | null
   latitude: number | null
   longitude: number | null
+  incident_type?: string | null
+  state?: string | null
+  duration?: string | null
+  what_worked?: string[]
+  what_failed?: string[]
+  wish_had?: string[]
+  key_takeaway?: string | null
   upvote_count: number
   downvote_count: number
   created_at: string
@@ -271,6 +278,36 @@ export default function PostPage() {
             <div style={{ marginBottom: '24px' }}>
               <PostBody text={post.body} />
             </div>
+
+            {post.post_type === 'aar' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+                {(post.state || post.duration) && (
+                  <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)' }}>
+                    {[post.state, post.duration].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+                {post.key_takeaway && (
+                  <div style={{ padding: '12px 16px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.25)' }}>
+                    <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: '#3B82F6', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '4px' }}>Key Takeaway</div>
+                    <div style={{ fontSize: '14px', color: 'var(--color-text)' }}>{post.key_takeaway}</div>
+                  </div>
+                )}
+                {([
+                  ['What Worked', post.what_worked, '#22C55E'],
+                  ['What Failed', post.what_failed, '#EF4444'],
+                  ['What They Wish They Had', post.wish_had, '#F59E0B'],
+                ] as [string, string[] | undefined, string][]).map(([label, items, itemColor]) => (
+                  items && items.length > 0 ? (
+                    <div key={label}>
+                      <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: itemColor, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>{label}</div>
+                      <ul style={{ margin: 0, paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {items.map((item, i) => <li key={i} style={{ fontSize: '13px', color: 'var(--color-muted)' }}>{item}</li>)}
+                      </ul>
+                    </div>
+                  ) : null
+                ))}
+              </div>
+            )}
           </>
         )}
 

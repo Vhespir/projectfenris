@@ -33,10 +33,10 @@ export async function refRoutes(app, { pool }) {
       }
       if (t === 'aar') {
         const r = await pool.query(
-          `SELECT a.id, 'aar' AS type, a.slug, a.title, a.incident_date, a.created_at,
+          `SELECT p.id, 'aar' AS type, p.slug, p.title, p.incident_type, p.created_at,
                   u.username AS author
-           FROM after_action_reports a JOIN users u ON u.id = a.user_id
-           WHERE a.slug = $1`, [slug])
+           FROM posts p JOIN users u ON u.id = p.user_id
+           WHERE p.slug = $1 AND p.post_type = 'aar' AND p.is_removed = FALSE`, [slug])
         if (r.rows.length) return r.rows[0]
       }
     }

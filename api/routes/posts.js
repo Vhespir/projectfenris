@@ -13,9 +13,15 @@ const CATEGORY_TO_CHANNEL = {
   'General Discussion': 'general',
 }
 
+const AAR_INCIDENT_TYPES = [
+  'hurricane', 'earthquake', 'wildfire', 'flood', 'tornado', 'winter_storm',
+  'power_outage', 'medical', 'financial', 'civil_unrest', 'evacuation', 'other',
+]
+
 const CHANNEL_FILTER_MAP = {
   field:     { type: 'field_report',       category: null },
   news:      { type: 'self_reported_news', category: null },
+  aar:       { type: 'aar',                category: null },
   pattern:   { type: 'pattern',            category: null },
   gear:      { type: 'community', category: 'Gear and Equipment' },
   food:      { type: 'community', category: 'Food and Water' },
@@ -33,8 +39,9 @@ export async function postRoutes(app, { pool }) {
   app.get('/posts', async (req) => {
     const { type, category, channels, sort = 'recent', limit = 50, offset = 0, ref } = req.query
     let query = `
-      SELECT p.id, p.post_type, p.category, p.title, p.body,
+      SELECT p.id, p.post_type, p.category, p.title, p.body, p.slug,
              p.location_label, p.latitude, p.longitude,
+             p.incident_type, p.state, p.duration, p.key_takeaway,
              p.upvote_count, p.downvote_count, p.created_at, p.updated_at,
              u.username, u.reputation, u.is_trusted,
              (u.id <= 100) AS is_founding_member
@@ -93,8 +100,10 @@ export async function postRoutes(app, { pool }) {
   // Get single post
   app.get('/posts/:id', async (req, reply) => {
     const { rows } = await pool.query(`
-      SELECT p.id, p.post_type, p.category, p.title, p.body,
+      SELECT p.id, p.post_type, p.category, p.title, p.body, p.slug,
              p.location_label, p.latitude, p.longitude,
+             p.incident_type, p.state, p.duration,
+             p.what_worked, p.what_failed, p.wish_had, p.key_takeaway,
              p.upvote_count, p.downvote_count, p.created_at, p.updated_at,
              u.id AS user_id, u.username, u.reputation, u.is_trusted,
              (u.id <= 100) AS is_founding_member
@@ -121,21 +130,40 @@ export async function postRoutes(app, { pool }) {
     config: { rateLimit: { max: 10, timeWindow: '1 hour' } },
   }, async (req, reply) => {
     if (await checkMuted(pool, req.user.id, reply)) return
-    const { post_type, category, title, body, location_label, latitude, longitude } = req.body ?? {}
+    const {
+      post_type, category, title, body, location_label, latitude, longitude,
+      incident_type, state, duration, what_worked, what_failed, wish_had, key_takeaway,
+    } = req.body ?? {}
 
-    if (!post_type || !category || !title || !body) {
-      return reply.code(400).send({ error: 'post_type, category, title, and body are required' })
-    }
-
-    const validTypes = ['community', 'field_report', 'self_reported_news']
-    if (!validTypes.includes(post_type)) {
+    const validTypes = ['community', 'field_report', 'self_reported_news', 'aar']
+    if (!post_type || !validTypes.includes(post_type)) {
       return reply.code(400).send({ error: 'Invalid post_type' })
+    }
+    if (!title?.trim()) {
+      return reply.code(400).send({ error: 'title is required' })
     }
     if (title.trim().length > 200) {
       return reply.code(400).send({ error: 'Title must be 200 characters or fewer' })
     }
-    if (body.trim().length > 10000) {
-      return reply.code(400).send({ error: 'Body must be 10,000 characters or fewer' })
+
+    const isAar = post_type === 'aar'
+    if (isAar) {
+      if (!incident_type || !AAR_INCIDENT_TYPES.includes(incident_type)) {
+        return reply.code(400).send({ error: 'A valid incident_type is required for after-action reports' })
+      }
+      if (!body?.trim()) {
+        return reply.code(400).send({ error: 'narrative is required' })
+      }
+      if (body.trim().length > 20000) {
+        return reply.code(400).send({ error: 'Narrative must be 20,000 characters or fewer' })
+      }
+    } else {
+      if (!category || !body?.trim()) {
+        return reply.code(400).send({ error: 'post_type, category, title, and body are required' })
+      }
+      if (body.trim().length > 10000) {
+        return reply.code(400).send({ error: 'Body must be 10,000 characters or fewer' })
+      }
     }
 
     const lat = latitude !== undefined && latitude !== '' ? parseFloat(latitude) : null
@@ -144,16 +172,32 @@ export async function postRoutes(app, { pool }) {
       return reply.code(400).send({ error: 'Invalid latitude or longitude' })
     }
 
+    const clean = (arr) => (Array.isArray(arr) ? arr.map(s => String(s).trim()).filter(Boolean) : [])
+
     const { rows } = await pool.query(`
-      INSERT INTO posts (user_id, post_type, category, title, body, location_label, latitude, longitude)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, post_type, category, title, body, location_label, latitude, longitude,
+      INSERT INTO posts (
+        user_id, post_type, category, title, body, location_label, latitude, longitude,
+        incident_type, state, duration, what_worked, what_failed, wish_had, key_takeaway
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+      RETURNING id, post_type, category, title, body, slug, location_label, latitude, longitude,
+                incident_type, state, duration, what_worked, what_failed, wish_had, key_takeaway,
                 upvote_count, created_at
-    `, [req.user.id, post_type, category, title.trim(), body.trim(),
-        location_label || null, lat, lon])
+    `, [
+      req.user.id, post_type, isAar ? incident_type : category, title.trim(), body.trim(),
+      location_label?.trim() || null, lat, lon,
+      isAar ? incident_type : null,
+      isAar ? (state?.trim() || null) : null,
+      isAar ? (duration?.trim() || null) : null,
+      isAar ? clean(what_worked) : [],
+      isAar ? clean(what_failed) : [],
+      isAar ? clean(wish_had) : [],
+      isAar ? (key_takeaway?.trim() || null) : null,
+    ])
 
     const channelId = post_type === 'field_report' ? 'field'
       : post_type === 'self_reported_news' ? 'news'
+      : post_type === 'aar' ? 'aar'
       : (CATEGORY_TO_CHANNEL[category] ?? 'general')
     emitToChannel(channelId, 'new_post', rows[0])
     emitToChannel('all', 'new_post', rows[0])
@@ -215,8 +259,13 @@ export async function postRoutes(app, { pool }) {
   // Edit post (author only)
   app.patch('/posts/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     const postId = Number(req.params.id)
-    const { title, body } = req.body ?? {}
-    if (!title?.trim() && !body?.trim()) {
+    const {
+      title, body, location_label, state, duration,
+      what_worked, what_failed, wish_had, key_takeaway,
+    } = req.body ?? {}
+    const nothingToUpdate = [title, body, location_label, state, duration, key_takeaway].every(v => !v?.trim?.())
+      && what_worked === undefined && what_failed === undefined && wish_had === undefined
+    if (nothingToUpdate) {
       return reply.code(400).send({ error: 'Nothing to update' })
     }
     if (title && title.trim().length > 200) {
@@ -230,14 +279,31 @@ export async function postRoutes(app, { pool }) {
     if (!rows.length) return reply.code(404).send({ error: 'Post not found' })
     if (rows[0].user_id !== req.user.id) return reply.code(403).send({ error: 'Forbidden' })
 
+    const clean = (arr) => arr !== undefined
+      ? (Array.isArray(arr) ? arr.map(s => String(s).trim()).filter(Boolean) : [])
+      : null
+
     const { rows: updated } = await pool.query(`
       UPDATE posts SET
-        title = COALESCE($1, title),
-        body  = COALESCE($2, body),
-        updated_at = NOW()
-      WHERE id = $3
-      RETURNING id, title, body, updated_at
-    `, [title?.trim() ?? null, body?.trim() ?? null, postId])
+        title          = COALESCE($1, title),
+        body           = COALESCE($2, body),
+        location_label = COALESCE($3, location_label),
+        state          = COALESCE($4, state),
+        duration       = COALESCE($5, duration),
+        what_worked    = COALESCE($6, what_worked),
+        what_failed    = COALESCE($7, what_failed),
+        wish_had       = COALESCE($8, wish_had),
+        key_takeaway   = COALESCE($9, key_takeaway),
+        updated_at     = NOW()
+      WHERE id = $10
+      RETURNING id, title, body, location_label, state, duration,
+                what_worked, what_failed, wish_had, key_takeaway, updated_at
+    `, [
+      title?.trim() || null, body?.trim() || null,
+      location_label?.trim() || null, state?.trim() || null, duration?.trim() || null,
+      clean(what_worked), clean(what_failed), clean(wish_had),
+      key_takeaway?.trim() || null, postId,
+    ])
     return updated[0]
   })
 

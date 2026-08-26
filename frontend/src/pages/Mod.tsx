@@ -76,7 +76,6 @@ interface ModActivity {
   posts: ActivityItem[]
   comments: ActivityItem[]
   guides: ActivityItem[]
-  aars: ActivityItem[]
 }
 
 function timeAgo(iso: string) {
@@ -788,12 +787,11 @@ export default function Mod() {
                           {activityLoading ? (
                             <span style={{ color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>Loading activity...</span>
                           ) : activity && activity.user.id === u.id ? (
-                            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(4, 1fr)', gap: '16px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: '16px' }}>
                               {([
                                 ['Posts', activity.posts],
                                 ['Comments', activity.comments],
                                 ['Guides', activity.guides],
-                                ['AARs', activity.aars],
                               ] as [string, ActivityItem[]][]).map(([label, items]) => (
                                 <div key={label}>
                                   <div style={{ fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
