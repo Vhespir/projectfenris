@@ -21,6 +21,7 @@ import { modRoutes } from './routes/mod.js'
 import { externalRoutes } from './routes/external.js'
 import { frequencyRoutes } from './routes/frequencies.js'
 import { inventoryRoutes } from './routes/inventory.js'
+import { gardenRoutes } from './routes/garden.js'
 import { refRoutes } from './routes/refs.js'
 import { checkMuted } from './lib/moderation.js'
 import { initSocket } from './lib/socket.js'
@@ -392,6 +393,7 @@ await app.register(modRoutes, { pool })
 await app.register(externalRoutes)
 await app.register(frequencyRoutes, { pool })
 await app.register(inventoryRoutes, { pool })
+await app.register(gardenRoutes, { pool })
 await app.register(refRoutes, { pool })
 
 try {

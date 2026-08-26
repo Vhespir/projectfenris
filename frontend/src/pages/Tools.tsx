@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
+import GardenManager from './Garden'
 
 const inputStyle = {
   width: '100%', padding: '9px 12px', borderRadius: '6px', boxSizing: 'border-box' as const,
@@ -1580,6 +1581,12 @@ const TOOLS = [
     name: 'Inventory Manager',
     desc: 'One tab per cache: EDC, BOB, GHB, INCH, Vehicle, Home Cache. Each one already knows your water and food targets, groups medical and power items into their own sections, and Home Cache adds the documents checklist and generator calculator.',
     component: <InventoryHub />,
+  },
+  {
+    id: 'garden',
+    name: 'Garden & Crops',
+    desc: 'Beds, planted crops, harvest logs, and seed inventory, for anyone who grows some of their own food. Tracks rotation history per bed and flags replanting the same family too soon.',
+    component: <GardenManager />,
   },
 ]
 
