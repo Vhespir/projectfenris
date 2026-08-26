@@ -2,11 +2,15 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
-import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
+import { Responsive, WidthProvider, type Layout as RGLLayout } from 'react-grid-layout'
+import 'react-grid-layout/css/styles.css'
+import 'react-resizable/css/styles.css'
 import { EventLayer, RadarLayer, WeatherAlertLayer, type DisasterEvent } from '../components/MapEventLayer'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useContextDrawer } from '../context/ContextDrawerContext'
+
+const ResponsiveGridLayout = WidthProvider(Responsive)
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,33 +26,57 @@ interface Post {
 }
 interface DashData { events: DisasterEvent[]; news: NewsItem[]; posts: Post[]; loading: boolean }
 
-type ColMode = 1 | 2 | 3 | 'focus'
-
-interface SlotEntry {
+// A widget is a placed instance of a panel type; where it sits and how big
+// it is lives separately, in the layout array, keyed by the same id. Two
+// arrays instead of one nested structure because that's exactly the shape
+// react-grid-layout wants for layout, and it keeps "what's on the dashboard"
+// and "where it is" independently editable.
+interface PlacedWidget {
+  id: string
   type: string
   config: Record<string, unknown>
 }
+interface GridLayoutItem { i: string; x: number; y: number; w: number; h: number }
 
 interface DashboardPrefs {
-  columns: ColMode
-  rows: number
-  slots: Record<string, SlotEntry | null>
+  widgets: PlacedWidget[]
+  layout: GridLayoutItem[]
 }
 
 // ─── Default layout ───────────────────────────────────────────────────────────
 
-const DEFAULT_PREFS: DashboardPrefs = {
-  columns: 2,
-  rows: 3,
-  slots: {
-    '0': { type: 'live_feed',     config: {} },
-    '1': { type: 'map',           config: {} },
-    '2': { type: 'event_counts',  config: {} },
-    '3': { type: 'top_guides',    config: {} },
-    '4': { type: 'community',     config: {} },
-    '5': { type: 'field_reports', config: {} },
-  },
+const GRID_COLS = 12
+const ROW_HEIGHT = 28
+
+const DEFAULT_WIDGETS: PlacedWidget[] = [
+  { id: 'w1', type: 'live_feed',     config: {} },
+  { id: 'w2', type: 'map',           config: {} },
+  { id: 'w3', type: 'event_counts',  config: {} },
+  { id: 'w4', type: 'top_guides',    config: {} },
+  { id: 'w5', type: 'community',     config: {} },
+  { id: 'w6', type: 'field_reports', config: {} },
+]
+const DEFAULT_LAYOUT: GridLayoutItem[] = [
+  { i: 'w1', x: 0, y: 0,  w: 7, h: 18 },
+  { i: 'w2', x: 7, y: 0,  w: 5, h: 11 },
+  { i: 'w3', x: 7, y: 11, w: 5, h: 10 },
+  { i: 'w4', x: 0, y: 18, w: 4, h: 10 },
+  { i: 'w5', x: 4, y: 18, w: 4, h: 10 },
+  { i: 'w6', x: 8, y: 21, w: 4, h: 10 },
+]
+
+// Starting size for a widget added fresh from the picker, since panel
+// content varies a lot in how much room it actually wants.
+const DEFAULT_WH: Record<string, { w: number; h: number }> = {
+  live_feed: { w: 7, h: 18 }, map: { w: 6, h: 12 }, radar_widget: { w: 6, h: 10 },
+  event_counts: { w: 5, h: 10 }, storm_threats: { w: 4, h: 9 }, wildfires: { w: 4, h: 9 },
+  streamflow: { w: 4, h: 9 }, space_weather: { w: 4, h: 9 }, cisa_alerts: { w: 4, h: 9 },
+  travel_advisories: { w: 4, h: 9 }, recalls: { w: 4, h: 9 },
+  community: { w: 4, h: 10 }, field_reports: { w: 4, h: 10 }, top_guides: { w: 4, h: 10 },
+  markets: { w: 4, h: 9 }, economic_signals: { w: 4, h: 9 }, crypto: { w: 3, h: 7 },
+  drought: { w: 4, h: 8 }, near_earth: { w: 4, h: 9 }, inventory: { w: 4, h: 9 },
 }
+const DEFAULT_WH_FALLBACK = { w: 4, h: 9 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -117,58 +145,12 @@ function GeolocateUser() {
 // ─── Panel wrapper ────────────────────────────────────────────────────────────
 
 function Panel({
-  title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure,
-  dragHandleProps, isDropTarget,
-  onResize, currentSpan, maxSpan, currentMinHeight,
+  title, link, linkLabel, editMode, children, onChange, onRemove, onConfigure,
 }: {
   title: string; link?: string; linkLabel?: string
   editMode: boolean; children: React.ReactNode
-  onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
-  dragHandleProps?: { attributes: ReturnType<typeof useDraggable>['attributes']; listeners: ReturnType<typeof useDraggable>['listeners'] }
-  isDropTarget?: boolean
-  onResize?: (span: number, minHeight: number) => void; currentSpan?: number; maxSpan?: number; currentMinHeight?: number
+  onChange: () => void; onRemove: () => void; onConfigure?: () => void
 }) {
-  const panelRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ startX: number; startY: number; startW: number; startH: number; startSpan: number } | null>(null)
-  const onResizeRef = useRef(onResize)
-  onResizeRef.current = onResize
-  const [resizing, setResizing] = useState(false)
-
-  const span = currentSpan ?? 1
-  const maxSpanVal = maxSpan ?? 1
-
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      if (!dragRef.current || !panelRef.current) return
-      const { startX, startY, startW, startH, startSpan } = dragRef.current
-      const newH = Math.max(80, startH + (e.clientY - startY))
-      panelRef.current.style.minHeight = `${newH}px`
-      if (maxSpanVal > 1) {
-        const colWidth = startW / startSpan
-        const deltaSpan = Math.round((e.clientX - startX) / colWidth)
-        const newSpan = Math.min(maxSpanVal, Math.max(1, startSpan + deltaSpan))
-        panelRef.current.dataset.pendingSpan = String(newSpan)
-      }
-    }
-    function onMouseUp(e: MouseEvent) {
-      if (!dragRef.current || !panelRef.current) return
-      const { startX, startY, startW, startH, startSpan } = dragRef.current
-      const newH = Math.max(80, startH + (e.clientY - startY))
-      let newSpan = startSpan
-      if (maxSpanVal > 1) {
-        const colWidth = startW / startSpan
-        const deltaSpan = Math.round((e.clientX - startX) / colWidth)
-        newSpan = Math.min(maxSpanVal, Math.max(1, startSpan + deltaSpan))
-      }
-      onResizeRef.current?.(newSpan, newH)
-      dragRef.current = null
-      setResizing(false)
-    }
-    window.addEventListener('mousemove', onMouseMove)
-    window.addEventListener('mouseup', onMouseUp)
-    return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp) }
-  }, [maxSpanVal])
-
   const eBtnStyle: React.CSSProperties = {
     background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '3px',
     color: 'var(--color-muted)', cursor: 'pointer', fontSize: '12px', padding: '1px 6px',
@@ -177,20 +159,16 @@ function Panel({
 
   return (
     <div
-      ref={panelRef}
       style={{
-        border: `1px solid ${isDropTarget ? 'var(--color-accent)' : 'var(--color-border)'}`,
+        border: '1px solid var(--color-border)',
         borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden',
-        boxShadow: isDropTarget ? '0 0 0 2px rgba(34,197,94,0.2)' : 'none',
-        minHeight: currentMinHeight ? `${currentMinHeight}px` : undefined,
-        display: 'flex', flexDirection: 'column', position: 'relative',
+        height: '100%', display: 'flex', flexDirection: 'column',
       }}
     >
       <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)', flexShrink: 0 }}>
-        {editMode && dragHandleProps && (
+        {editMode && (
           <span
-            {...dragHandleProps.attributes}
-            {...dragHandleProps.listeners}
+            className="dash-drag-handle"
             title="Drag to move"
             style={{ cursor: 'grab', color: 'var(--color-subtle)', fontSize: '13px', lineHeight: 1, letterSpacing: '-1px', touchAction: 'none', flexShrink: 0, padding: '2px' }}
           >
@@ -201,8 +179,8 @@ function Panel({
         {editMode ? (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             {onConfigure && <button onClick={onConfigure} style={eBtnStyle}>Config</button>}
-            <button onClick={e => { e.stopPropagation(); onPickSlot() }} style={eBtnStyle}>Change</button>
-            <button onClick={e => { e.stopPropagation(); onClear() }} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }}>Remove</button>
+            <button onClick={e => { e.stopPropagation(); onChange() }} style={eBtnStyle}>Change</button>
+            <button onClick={e => { e.stopPropagation(); onRemove() }} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }}>Remove</button>
           </div>
         ) : link ? (
           <Link to={link} style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', letterSpacing: '0.04em', textDecoration: 'none' }}>
@@ -210,61 +188,7 @@ function Panel({
           </Link>
         ) : null}
       </div>
-      <div style={{ flex: 1 }}>{children}</div>
-      {editMode && onResize && (
-        <div
-          onMouseDown={e => {
-            e.preventDefault()
-            setResizing(true)
-            dragRef.current = {
-              startX: e.clientX, startY: e.clientY,
-              startW: panelRef.current?.offsetWidth ?? 200, startH: panelRef.current?.offsetHeight ?? 120,
-              startSpan: span,
-            }
-          }}
-          style={{
-            position: 'absolute', bottom: 0, right: 0, width: '18px', height: '18px',
-            cursor: maxSpanVal > 1 ? 'nwse-resize' : 'ns-resize', zIndex: 5,
-            display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: '3px',
-          }}
-        >
-          <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: resizing ? 1 : 0.35 }}>
-            <path d="M9 1 L1 9 M9 5 L5 9 M9 9 L9 9" stroke="var(--color-accent)" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── Empty slot ───────────────────────────────────────────────────────────────
-
-function EmptySlot({ editMode, onClick, isDropTarget, dropRef }: { editMode: boolean; onClick: () => void; isDropTarget?: boolean; dropRef?: (node: HTMLElement | null) => void }) {
-  const [hovered, setHovered] = useState(false)
-  const active = hovered || isDropTarget
-  return (
-    <div
-      ref={dropRef}
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        border: `1px dashed ${isDropTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
-        borderRadius: '8px',
-        minHeight: '120px',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
-        gap: '7px',
-        cursor: editMode ? 'pointer' : 'default',
-        background: isDropTarget ? 'rgba(34,197,94,0.06)' : active ? 'rgba(255,255,255,0.02)' : 'transparent',
-        transition: 'border-color 0.12s, background 0.12s',
-      }}
-    >
-      <span style={{ fontSize: '16px', color: isDropTarget ? 'rgba(34,197,94,0.6)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', lineHeight: 1, transition: 'color 0.12s' }}>
-        {isDropTarget ? '⇩' : '+'}
-      </span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: isDropTarget ? 'rgba(34,197,94,0.6)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', letterSpacing: '0.08em', transition: 'color 0.12s' }}>
-        {isDropTarget ? 'Drop here' : 'Add a panel.'}
-      </span>
+      <div style={{ flex: 1, overflow: 'auto' }}>{children}</div>
     </div>
   )
 }
@@ -508,7 +432,7 @@ function EventCountsContent({ data, config, onSetConfig }: {
   onSetConfig?: (u: Record<string, unknown>) => void
 }) {
   // MeteoAlarm alone can carry thousands of Minor-severity advisories across
-  // 45 countries -- real data, but it swamps this summary's whole point,
+  // 45 countries, real data, but it swamps this summary's whole point,
   // which is telling you what actually matters. Minor is hidden by default;
   // toggle it back on via Config to see everything.
   const hideMinor = config?.hideMinor !== false
@@ -1619,78 +1543,6 @@ function PanelPicker({ onSelect, onClose }: { onSelect: (id: string) => void; on
 
 // ─── Confirm dialog ───────────────────────────────────────────────────────────
 
-function ConfirmDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
-  return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.72)', zIndex: 1001, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-      <div style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '10px', padding: '24px', maxWidth: '360px', width: '100%' }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '10px' }}>Change Column Layout?</div>
-        <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', lineHeight: 1.5, marginBottom: '20px' }}>
-          Switching column count resets all slot assignments. Your current layout will be cleared.
-        </div>
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ padding: '7px 16px', borderRadius: '6px', fontSize: '13px', fontFamily: 'var(--font-display)', cursor: 'pointer', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)' }}>
-            Cancel
-          </button>
-          <button onClick={onConfirm} style={{ padding: '7px 16px', borderRadius: '6px', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer', border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.1)', color: '#EF4444' }}>
-            Reset and Switch
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Slot (draggable/droppable grid cell) ─────────────────────────────────────
-
-function DashSlot({
-  slotKey, slot, def, editMode, span, numCols, activeDragKey,
-  onPickSlot, onClear, onConfigure, onResize, onSetConfig, data,
-}: {
-  slotKey: string; slot: SlotEntry | null; def: PanelDef | null | undefined
-  editMode: boolean; span: number; numCols: number; activeDragKey: string | null
-  onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
-  onResize: (span: number, minHeight: number) => void
-  onSetConfig: (u: Record<string, unknown>) => void
-  data: DashData
-}) {
-  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: slotKey, disabled: !editMode || !slot })
-  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: slotKey, disabled: !editMode })
-  const spanStyle: React.CSSProperties = span > 1 ? { gridColumn: `span ${span}` } : {}
-  const isDropTarget = isOver && activeDragKey !== null && activeDragKey !== slotKey
-
-  const setRefs = (node: HTMLElement | null) => { setDragRef(node); setDropRef(node) }
-
-  if (!slot || !def) {
-    return (
-      <div style={spanStyle}>
-        <EmptySlot editMode={editMode} isDropTarget={isDropTarget} dropRef={setRefs} onClick={onPickSlot} />
-      </div>
-    )
-  }
-
-  return (
-    <div ref={setRefs} style={{ position: 'relative', opacity: isDragging ? 0.35 : 1, ...spanStyle }}>
-      <Panel
-        title={def.label}
-        link={!editMode ? def.link : undefined}
-        linkLabel={def.linkLabel}
-        editMode={editMode}
-        onPickSlot={onPickSlot}
-        onClear={onClear}
-        onConfigure={onConfigure}
-        dragHandleProps={editMode ? { attributes, listeners } : undefined}
-        isDropTarget={isDropTarget}
-        currentSpan={span}
-        maxSpan={numCols}
-        onResize={onResize}
-        currentMinHeight={typeof slot.config.minHeight === 'number' ? slot.config.minHeight : undefined}
-      >
-        {renderPanelContent(slot.type, data, slot.config, onSetConfig)}
-      </Panel>
-    </div>
-  )
-}
-
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -1703,14 +1555,12 @@ export default function Dashboard() {
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [columns, setColumns] = useState<ColMode>(DEFAULT_PREFS.columns)
-  const [rows, setRows] = useState(DEFAULT_PREFS.rows)
-  const [slots, setSlots] = useState<Record<string, SlotEntry | null>>(DEFAULT_PREFS.slots)
+  const [widgets, setWidgets] = useState<PlacedWidget[]>(DEFAULT_WIDGETS)
+  const [layout, setLayout] = useState<GridLayoutItem[]>(DEFAULT_LAYOUT)
   const [editMode, setEditMode] = useState(false)
-  const [pickerSlot, setPickerSlot] = useState<string | null>(null)
-  const [confirmColumns, setConfirmColumns] = useState<ColMode | null>(null)
-  const [activeDragKey, setActiveDragKey] = useState<string | null>(null)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+  // 'add' opens the picker to append a new widget; any other string is the
+  // id of an existing widget whose type is being swapped in place.
+  const [picker, setPicker] = useState<'add' | string | null>(null)
 
   const hydratedRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1737,10 +1587,9 @@ export default function Dashboard() {
     if (!user || hydratedRef.current) return
     hydratedRef.current = true
     const pref = (user.preferences as { dashboard?: DashboardPrefs } | undefined)?.dashboard
-    if (pref?.columns && pref?.rows && pref?.slots) {
-      setColumns(pref.columns)
-      setRows(pref.rows)
-      setSlots(pref.slots)
+    if (pref?.widgets && pref?.layout) {
+      setWidgets(pref.widgets)
+      setLayout(pref.layout)
     }
   }, [user])
 
@@ -1753,7 +1602,7 @@ export default function Dashboard() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ preferences: { dashboard: { columns, rows, slots } } }),
+        body: JSON.stringify({ preferences: { dashboard: { widgets, layout } } }),
       })
         .then(res => {
           if (!res.ok) throw new Error(`save failed: ${res.status}`)
@@ -1766,20 +1615,16 @@ export default function Dashboard() {
         })
     }, 2000)
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
-  }, [columns, rows, slots, user])
+  }, [widgets, layout, user])
 
   useEffect(() => {
     if (editMode) return
-    setSlots(prev => {
-      const next = { ...prev }
+    setWidgets(prev => {
       let changed = false
-      for (const key of Object.keys(next)) {
-        const slot = next[key]
-        if (slot?.config?._open) {
-          next[key] = { ...slot, config: { ...slot.config, _open: false } }
-          changed = true
-        }
-      }
+      const next = prev.map(w => {
+        if (w.config?._open) { changed = true; return { ...w, config: { ...w.config, _open: false } } }
+        return w
+      })
       return changed ? next : prev
     })
   }, [editMode])
@@ -1787,117 +1632,49 @@ export default function Dashboard() {
   const data: DashData = { events, news, posts, loading }
   const severeCount = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
 
-  function setSlotConfig(key: string, update: Record<string, unknown>) {
-    setSlots(prev => {
-      const slot = prev[key]
-      if (!slot) return prev
-      return { ...prev, [key]: { ...slot, config: { ...slot.config, ...update } } }
-    })
+  function setWidgetConfig(id: string, update: Record<string, unknown>) {
+    setWidgets(prev => prev.map(w => w.id === id ? { ...w, config: { ...w.config, ...update } } : w))
   }
 
-  function handlePickerSelect(panelId: string) {
-    if (pickerSlot === null) return
-    setSlots(prev => ({ ...prev, [pickerSlot]: { type: panelId, config: {} } }))
-    setPickerSlot(null)
+  function removeWidget(id: string) {
+    setWidgets(prev => prev.filter(w => w.id !== id))
+    setLayout(prev => prev.filter(l => l.i !== id))
   }
 
-  function applyColumnSwitch(mode: ColMode) {
-    setColumns(mode)
-    setRows(3)
-    setSlots({})
-    setConfirmColumns(null)
-  }
-
-  function handleColumnChange(mode: ColMode) {
-    if (mode === columns) return
-    const anyFilled = Object.values(slots).some(s => s !== null)
-    if (anyFilled) {
-      setConfirmColumns(mode)
-    } else {
-      applyColumnSwitch(mode)
+  function handlePickerSelect(type: string) {
+    if (picker === 'add') {
+      const id = `w_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const size = DEFAULT_WH[type] ?? DEFAULT_WH_FALLBACK
+      setWidgets(prev => [...prev, { id, type, config: {} }])
+      // y: Infinity is react-grid-layout's own convention for "place this
+      // after everything else", the vertical compactor does the rest.
+      setLayout(prev => [...prev, { i: id, x: 0, y: Infinity, w: size.w, h: size.h }])
+    } else if (picker) {
+      const id = picker
+      setWidgets(prev => prev.map(w => w.id === id ? { id, type, config: {} } : w))
     }
+    setPicker(null)
   }
 
-  function removeRow(rowIdx: number) {
-    const numCols = columns as number
-    const total = rows * numCols
-    setSlots(prev => {
-      const next: Record<string, SlotEntry | null> = {}
-      let newIdx = 0
-      for (let i = 0; i < total; i++) {
-        if (Math.floor(i / numCols) === rowIdx) continue
-        next[String(newIdx)] = prev[String(i)] ?? null
-        newIdx++
-      }
-      return next
-    })
-    setRows(r => r - 1)
+  function handleLayoutChange(current: RGLLayout[]) {
+    // The auto-generated single-column mobile view is read-only and derived
+    // from the real layout, not a second copy of it, never let it feed
+    // back and overwrite the desktop layout everyone actually edits.
+    if (isMobile) return
+    setLayout(current.map(l => ({ i: l.i, x: l.x, y: l.y, w: l.w, h: l.h })))
   }
-
-  function swapSlots(a: string, b: string) {
-    setSlots(prev => ({ ...prev, [a]: prev[b] ?? null, [b]: prev[a] ?? null }))
-  }
-
-  function handleDragStart(e: DragStartEvent) {
-    setActiveDragKey(String(e.active.id))
-  }
-  function handleDragEnd(e: DragEndEvent) {
-    setActiveDragKey(null)
-    if (!e.over) return
-    const a = String(e.active.id), b = String(e.over.id)
-    if (a !== b) swapSlots(a, b)
-  }
-
-  function renderSlot(key: string) {
-    const slot = slots[key] ?? null
-    const def = slot ? PANEL_DEFS.find(p => p.id === slot.type) : null
-    const numCols = typeof columns === 'number' ? columns : 2
-    const span = typeof slot?.config?.span === 'number' ? Math.min(slot.config.span, numCols) : 1
-
-    return (
-      <DashSlot
-        key={key}
-        slotKey={key}
-        slot={slot}
-        def={def}
-        editMode={editMode}
-        span={span}
-        numCols={numCols}
-        activeDragKey={activeDragKey}
-        onPickSlot={() => setPickerSlot(key)}
-        onClear={() => setSlots(prev => ({ ...prev, [key]: null }))}
-        onConfigure={def?.configurable ? () => setSlotConfig(key, { _open: !slot!.config._open }) : undefined}
-        onResize={(s, h) => setSlotConfig(key, { span: s, minHeight: h })}
-        onSetConfig={u => setSlotConfig(key, u)}
-        data={data}
-      />
-    )
-  }
-
-  const activeDragLabel = activeDragKey != null
-    ? PANEL_DEFS.find(p => p.id === slots[activeDragKey]?.type)?.label
-    : null
 
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
 
-  const colBtnStyle = (active: boolean): React.CSSProperties => ({
-    padding: '4px 10px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-mono)',
-    cursor: 'pointer',
-    border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
-    background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
-    color: active ? 'var(--color-accent)' : 'var(--color-muted)',
-  })
-
-  const COL_MODES: { value: ColMode; label: string }[] = [
-    { value: 1, label: '1' },
-    { value: 2, label: '2' },
-    { value: 3, label: '3' },
-    { value: 'focus', label: 'Focus' },
-  ]
-
   return (
     <div>
+      <style>{`
+        .dash-grid .react-grid-item.react-grid-placeholder { background: var(--color-accent); opacity: 0.15; border-radius: 8px; }
+        .dash-grid .react-resizable-handle { opacity: 0.4; }
+        .dash-grid .react-resizable-handle:hover { opacity: 1; }
+        .dash-grid .react-resizable-handle::after { border-color: var(--color-accent) !important; width: 9px !important; height: 9px !important; }
+      `}</style>
       <div style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
         <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '20px 24px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
@@ -1910,14 +1687,12 @@ export default function Dashboard() {
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0, flexWrap: 'wrap' }}>
             {editMode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginRight: '2px' }}>Cols</span>
-                {COL_MODES.map(m => (
-                  <button key={String(m.value)} onClick={() => handleColumnChange(m.value)} style={colBtnStyle(columns === m.value)}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
+              <button
+                onClick={() => setPicker('add')}
+                style={{ padding: '5px 12px', borderRadius: '5px', fontSize: '12px', fontFamily: 'var(--font-display)', fontWeight: 500, cursor: 'pointer', border: '1px solid var(--color-accent)', background: 'rgba(34,197,94,0.1)', color: 'var(--color-accent)' }}
+              >
+                + Add Widget
+              </button>
             )}
             {!editMode && severeCount > 0 && (
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: '5px', padding: '4px 10px' }}>
@@ -1953,93 +1728,73 @@ export default function Dashboard() {
         )}
       </div>
 
-      {editMode && (
+      {editMode && !isMobile && (
         <div style={{ background: 'rgba(34,197,94,0.08)', borderBottom: '1px solid rgba(34,197,94,0.2)', padding: '6px 24px', textAlign: 'center' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(34,197,94,0.8)', letterSpacing: '0.08em' }}>
-            Drag the ⠿ handle to move a panel. Drag the corner to resize.
+            Drag the ⠿ handle to move a panel anywhere. Drag the bottom-right corner to resize it.
+          </span>
+        </div>
+      )}
+      {editMode && isMobile && (
+        <div style={{ background: 'rgba(59,130,246,0.08)', borderBottom: '1px solid rgba(59,130,246,0.2)', padding: '6px 24px', textAlign: 'center' }}>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: '#93C5FD', letterSpacing: '0.08em' }}>
+            Move and resize need a wider screen. This is a stacked preview of your layout.
           </span>
         </div>
       )}
 
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '24px' }}>
-        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveDragKey(null)}>
-          {columns === 'focus' && !isMobile ? (
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px', alignItems: 'start' }}>
-              {renderSlot('0')}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                {[1, 2, 3].map(i => renderSlot(String(i)))}
-              </div>
-            </div>
-          ) : columns === 'focus' && isMobile ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {[0, 1, 2, 3].map(i => renderSlot(String(i)))}
-            </div>
-          ) : isMobile ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {Array.from({ length: rows * (columns as number) }, (_, i) => renderSlot(String(i)))}
-            </div>
-          ) : (() => {
-            const numCols = columns as number
-            return (
-              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: '14px', alignItems: 'start' }}>
-                {Array.from({ length: rows * numCols }, (_, i) => renderSlot(String(i)))}
-              </div>
-            )
-          })()}
-          <DragOverlay>
-            {activeDragLabel ? (
-              <div style={{
-                padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--color-accent)',
-                background: 'var(--color-surface-elevated)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-                fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-accent)',
-                cursor: 'grabbing',
-              }}>
-                {activeDragLabel}
-              </div>
-            ) : null}
-          </DragOverlay>
-        </DndContext>
-
-        {columns !== 'focus' && !isMobile && editMode && (() => {
-          const numCols = columns as number
-          const removeRowIdx = (() => {
-            for (let r = rows - 1; r >= 0; r--) {
-              const keys = Array.from({ length: numCols }, (_, c) => String(r * numCols + c))
-              if (keys.every(k => !slots[k])) return r
-            }
-            return null
-          })()
-          return removeRowIdx !== null && rows > 1 ? (
-            <div style={{ marginTop: '8px', textAlign: 'right' }}>
-              <button
-                onClick={() => removeRow(removeRowIdx)}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(239,68,68,0.5)', padding: '2px 0' }}
-                onMouseEnter={e => (e.currentTarget.style.color = '#EF4444')}
-                onMouseLeave={e => (e.currentTarget.style.color = 'rgba(239,68,68,0.5)')}
-              >
-                Remove empty row
-              </button>
-            </div>
-          ) : null
-        })()}
-
-        {columns !== 'focus' && editMode && (
-          <div style={{ marginTop: '14px' }}>
+        {widgets.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 24px', border: '1px dashed var(--color-border)', borderRadius: '8px' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '10px' }}>Nothing on the dashboard</div>
             <button
-              onClick={() => setRows(r => r + 1)}
-              style={{ width: '100%', padding: '10px', background: 'transparent', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '8px', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'rgba(255,255,255,0.25)', letterSpacing: '0.06em' }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)'; e.currentTarget.style.color = 'rgba(255,255,255,0.4)' }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; e.currentTarget.style.color = 'rgba(255,255,255,0.25)' }}
+              onClick={() => setPicker('add')}
+              style={{ padding: '8px 18px', borderRadius: '6px', border: 'none', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}
             >
-              + Add Row
+              + Add a widget
             </button>
           </div>
+        ) : (
+          <ResponsiveGridLayout
+            className="dash-grid"
+            layouts={{ lg: layout }}
+            breakpoints={{ lg: 768, sm: 0 }}
+            cols={{ lg: GRID_COLS, sm: 1 }}
+            rowHeight={ROW_HEIGHT}
+            margin={[14, 14]}
+            containerPadding={[0, 0]}
+            isDraggable={editMode && !isMobile}
+            isResizable={editMode && !isMobile}
+            draggableHandle=".dash-drag-handle"
+            compactType="vertical"
+            useCSSTransforms
+            onLayoutChange={handleLayoutChange}
+          >
+            {widgets.map(w => {
+              const def = PANEL_DEFS.find(p => p.id === w.type)
+              return (
+                <div key={w.id}>
+                  <Panel
+                    title={def?.label ?? w.type}
+                    link={!editMode ? def?.link : undefined}
+                    linkLabel={def?.linkLabel}
+                    editMode={editMode}
+                    onChange={() => setPicker(w.id)}
+                    onRemove={() => removeWidget(w.id)}
+                    onConfigure={def?.configurable ? () => setWidgetConfig(w.id, { _open: !w.config._open }) : undefined}
+                  >
+                    {renderPanelContent(w.type, data, w.config, u => setWidgetConfig(w.id, u))}
+                  </Panel>
+                </div>
+              )
+            })}
+          </ResponsiveGridLayout>
         )}
 
-        {editMode && (
+        {editMode && widgets.length > 0 && (
           <div style={{ marginTop: '16px', textAlign: 'center' }}>
             <button
-              onClick={() => { setColumns(DEFAULT_PREFS.columns); setRows(DEFAULT_PREFS.rows); setSlots(DEFAULT_PREFS.slots) }}
+              onClick={() => { setWidgets(DEFAULT_WIDGETS); setLayout(DEFAULT_LAYOUT) }}
               style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', padding: '4px 0' }}
               onMouseEnter={e => (e.currentTarget.style.color = 'var(--color-muted)')}
               onMouseLeave={e => (e.currentTarget.style.color = 'var(--color-subtle)')}
@@ -2050,11 +1805,8 @@ export default function Dashboard() {
         )}
       </div>
 
-      {pickerSlot !== null && (
-        <PanelPicker onSelect={handlePickerSelect} onClose={() => setPickerSlot(null)} />
-      )}
-      {confirmColumns !== null && (
-        <ConfirmDialog onConfirm={() => applyColumnSwitch(confirmColumns)} onCancel={() => setConfirmColumns(null)} />
+      {picker !== null && (
+        <PanelPicker onSelect={handlePickerSelect} onClose={() => setPicker(null)} />
       )}
     </div>
   )
