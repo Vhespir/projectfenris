@@ -1205,6 +1205,325 @@ function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
   )
 }
 
+// ─── Generator / Fuel Runtime Calculator ───────────────────────────────────────
+
+const APPLIANCE_LOADS: { label: string; watts: number }[] = [
+  { label: 'Refrigerator / freezer',   watts: 700 },
+  { label: 'Chest freezer',             watts: 350 },
+  { label: 'Sump pump',                 watts: 800 },
+  { label: 'Well pump',                 watts: 1000 },
+  { label: 'Furnace blower fan',        watts: 600 },
+  { label: 'Window AC unit',            watts: 1200 },
+  { label: 'Space heater',              watts: 1500 },
+  { label: 'CPAP machine',              watts: 60 },
+  { label: 'Lights (several)',          watts: 200 },
+  { label: 'Phone / laptop charging',   watts: 50 },
+  { label: 'Wifi router + modem',       watts: 30 },
+  { label: 'Chest/window TV',           watts: 150 },
+]
+
+function GeneratorCalculator() {
+  const isMobile = useIsMobile()
+  const [genWatts, setGenWatts] = useState(5000)
+  const [tankGal, setTankGal] = useState(5)
+  const [days, setDays] = useState(3)
+  const [hoursPerDay, setHoursPerDay] = useState(12)
+  const [checked, setChecked] = useState<Set<string>>(new Set(['Refrigerator / freezer', 'Lights (several)', 'Phone / laptop charging']))
+
+  function toggle(label: string) {
+    setChecked(prev => { const n = new Set(prev); n.has(label) ? n.delete(label) : n.add(label); return n })
+  }
+
+  const load = APPLIANCE_LOADS.filter(a => checked.has(a.label)).reduce((sum, a) => sum + a.watts, 0)
+  const overCapacity = load > genWatts
+  const loadFraction = genWatts > 0 ? Math.min(load / genWatts, 1) : 0
+  // Rough rule of thumb: a gas generator burns roughly 0.75 gal/hr per 10kW of
+  // rated output at 50% load, scaling with actual load fraction. Real
+  // consumption varies a lot by generator and fuel type -- this is a planning
+  // estimate, not a spec.
+  const gph = Math.max(0.15, (genWatts / 10000) * 0.75 * Math.max(loadFraction, 0.3))
+  const runtimePerTank = tankGal / gph
+  const fuelPerDay = hoursPerDay * gph
+  const totalFuelNeeded = fuelPerDay * days
+  const tanksNeeded = Math.ceil(totalFuelNeeded / tankGal)
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '32px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div><label style={labelStyle}>Generator rated watts</label><input type="number" min={500} step={500} value={genWatts} onChange={e => setGenWatts(+e.target.value || 0)} style={inputStyle} /></div>
+          <div><label style={labelStyle}>Fuel tank (gal)</label><input type="number" min={0.5} step={0.5} value={tankGal} onChange={e => setTankGal(+e.target.value || 0)} style={inputStyle} /></div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div><label style={labelStyle}>Days to plan for</label><input type="number" min={1} max={60} value={days} onChange={e => setDays(+e.target.value || 1)} style={inputStyle} /></div>
+          <div><label style={labelStyle}>Hours run per day</label><input type="number" min={1} max={24} value={hoursPerDay} onChange={e => setHoursPerDay(+e.target.value || 1)} style={inputStyle} /></div>
+        </div>
+        <div>
+          <label style={labelStyle}>What you'll run on it</label>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {APPLIANCE_LOADS.map(a => (
+              <label key={a.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--color-muted)', padding: '2px 0' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input type="checkbox" checked={checked.has(a.label)} onChange={() => toggle(a.label)} style={{ accentColor: 'var(--color-accent)', width: '14px', height: '14px' }} />
+                  {a.label}
+                </span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>{a.watts}W</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Load</div>
+        {resultRow('Running load', `${load.toLocaleString()} W`, !overCapacity)}
+        {resultRow('Generator capacity', `${genWatts.toLocaleString()} W`)}
+        {overCapacity && (
+          <div style={{ marginTop: '10px', padding: '12px 14px', borderRadius: '6px', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', fontSize: '12px', color: 'var(--color-danger)', lineHeight: 1.6 }}>
+            This load exceeds the generator's rated output. Drop something from the list or run appliances in shifts instead of all at once.
+          </div>
+        )}
+        <div style={{ marginTop: '16px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Fuel</div>
+        {resultRow('Estimated burn rate', `~${gph.toFixed(2)} gal/hr`)}
+        {resultRow('Runtime per full tank', `~${runtimePerTank.toFixed(1)} hrs`)}
+        {resultRow('Fuel per day', `~${fuelPerDay.toFixed(1)} gal`)}
+        {resultRow(`Fuel for ${days} day${days !== 1 ? 's' : ''}`, `~${totalFuelNeeded.toFixed(1)} gal`, true)}
+        {resultRow('Tanks to have on hand', `${tanksNeeded} tank${tanksNeeded !== 1 ? 's' : ''}`)}
+        <div style={{ marginTop: '16px', padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
+          Rule-of-thumb estimate, not a spec. Check your generator's actual fuel consumption curve if you have it, and store fuel legally and safely -- most home storage limits apply per container and per property.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Communications Plan ───────────────────────────────────────────────────────
+
+interface CommsMember { id: string; name: string; phone: string; notes: string }
+interface CommsPlanData {
+  outOfAreaContact: string; outOfAreaPhone: string
+  primaryMeeting: string; secondaryMeeting: string; outOfAreaMeeting: string
+  radioChannels: string
+  members: CommsMember[]
+}
+
+const EMPTY_COMMS_PLAN: CommsPlanData = {
+  outOfAreaContact: '', outOfAreaPhone: '',
+  primaryMeeting: '', secondaryMeeting: '', outOfAreaMeeting: '',
+  radioChannels: '',
+  members: [],
+}
+
+function loadCommsPlan(): CommsPlanData {
+  try {
+    const raw = localStorage.getItem('fenris_comms_plan')
+    return raw ? { ...EMPTY_COMMS_PLAN, ...JSON.parse(raw) } : EMPTY_COMMS_PLAN
+  } catch { return EMPTY_COMMS_PLAN }
+}
+
+function CommsPlan() {
+  const isMobile = useIsMobile()
+  const [plan, setPlan] = useState<CommsPlanData>(loadCommsPlan)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    try { localStorage.setItem('fenris_comms_plan', JSON.stringify(plan)) } catch {}
+  }, [plan])
+
+  function set<K extends keyof CommsPlanData>(key: K, value: CommsPlanData[K]) {
+    setPlan(prev => ({ ...prev, [key]: value }))
+  }
+  function addMember() {
+    set('members', [...plan.members, { id: `m_${Date.now()}`, name: '', phone: '', notes: '' }])
+  }
+  function updateMember(id: string, field: keyof CommsMember, value: string) {
+    set('members', plan.members.map(m => m.id === id ? { ...m, [field]: value } : m))
+  }
+  function removeMember(id: string) {
+    set('members', plan.members.filter(m => m.id !== id))
+  }
+
+  function asText() {
+    const lines = [
+      'FAMILY COMMUNICATIONS PLAN', '',
+      `Out-of-area contact: ${plan.outOfAreaContact || '(not set)'} -- ${plan.outOfAreaPhone || '(no phone)'}`, '',
+      `Primary meeting point (near home): ${plan.primaryMeeting || '(not set)'}`,
+      `Secondary meeting point (neighborhood/regional): ${plan.secondaryMeeting || '(not set)'}`,
+      `Out-of-area meeting point: ${plan.outOfAreaMeeting || '(not set)'}`, '',
+      `Radio channels to monitor: ${plan.radioChannels || '(not set)'}`, '',
+      'Family members:',
+      ...(plan.members.length
+        ? plan.members.map(m => `  - ${m.name || '(name)'} -- ${m.phone || '(phone)'}${m.notes ? ` -- ${m.notes}` : ''}`)
+        : ['  (none added)']),
+    ]
+    return lines.join('\n')
+  }
+
+  function copyPlan() {
+    navigator.clipboard.writeText(asText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
+        Pick an out-of-area contact -- local calls can fail when everyone's trying to use the network at once, but a long-distance call often gets through. Saved to this browser only.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
+        <div><label style={labelStyle}>Out-of-area contact name</label><input value={plan.outOfAreaContact} onChange={e => set('outOfAreaContact', e.target.value)} style={inputStyle} placeholder="Aunt Carol" /></div>
+        <div><label style={labelStyle}>Their phone</label><input value={plan.outOfAreaPhone} onChange={e => set('outOfAreaPhone', e.target.value)} style={inputStyle} placeholder="(555) 555-5555" /></div>
+      </div>
+
+      <div>
+        <label style={labelStyle}>Primary meeting point (right outside home)</label>
+        <input value={plan.primaryMeeting} onChange={e => set('primaryMeeting', e.target.value)} style={inputStyle} placeholder="e.g. the mailbox at the end of the driveway" />
+      </div>
+      <div>
+        <label style={labelStyle}>Secondary meeting point (if you can't get home)</label>
+        <input value={plan.secondaryMeeting} onChange={e => set('secondaryMeeting', e.target.value)} style={inputStyle} placeholder="e.g. the library on Main St" />
+      </div>
+      <div>
+        <label style={labelStyle}>Out-of-area meeting point (if the region is evacuated)</label>
+        <input value={plan.outOfAreaMeeting} onChange={e => set('outOfAreaMeeting', e.target.value)} style={inputStyle} placeholder="e.g. Aunt Carol's house" />
+      </div>
+      <div>
+        <label style={labelStyle}>Radio channels / frequencies to monitor</label>
+        <input value={plan.radioChannels} onChange={e => set('radioChannels', e.target.value)} style={inputStyle} placeholder="e.g. GMRS ch. 1, county fire dispatch -- see the Frequency Database" />
+        <Link to="/frequencies" style={{ display: 'inline-block', marginTop: '5px', fontSize: '11px', color: 'var(--color-accent)', fontFamily: 'var(--font-mono)', textDecoration: 'none' }}>
+          Look up local frequencies →
+        </Link>
+      </div>
+
+      <div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <label style={{ ...labelStyle, marginBottom: 0 }}>Family members</label>
+          <button onClick={addMember} style={{ padding: '4px 10px', borderRadius: '4px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-accent)', fontSize: '12px', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>+ Add</button>
+        </div>
+        {plan.members.length === 0 && (
+          <div style={{ fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>No members added yet.</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {plan.members.map(m => (
+            <div key={m.id} style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr auto', gap: '8px', alignItems: 'center' }}>
+              <input value={m.name} onChange={e => updateMember(m.id, 'name', e.target.value)} style={inputStyle} placeholder="Name" />
+              <input value={m.phone} onChange={e => updateMember(m.id, 'phone', e.target.value)} style={inputStyle} placeholder="Phone" />
+              <input value={m.notes} onChange={e => updateMember(m.id, 'notes', e.target.value)} style={inputStyle} placeholder="Notes (school, workplace...)" />
+              <button onClick={() => removeMember(m.id)} style={{ background: 'transparent', border: 'none', color: 'var(--color-danger)', cursor: 'pointer', fontSize: '18px', lineHeight: 1, padding: '4px 8px' }}>×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={copyPlan} style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid var(--color-border)', background: copied ? 'rgba(34,197,94,0.1)' : 'transparent', color: copied ? 'var(--color-accent)' : 'var(--color-muted)', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
+          {copied ? 'Copied!' : 'Copy plan as text'}
+        </button>
+        <button onClick={() => window.print()} style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
+          Print
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Important Documents Checklist ─────────────────────────────────────────────
+
+interface DocGroup { group: string; items: string[] }
+
+const DOC_GROUPS: DocGroup[] = [
+  { group: 'Identity', items: ['Driver\'s license / state ID', 'Passport', 'Birth certificates', 'Social Security cards', 'Marriage / divorce certificates'] },
+  { group: 'Financial', items: ['Bank account info', 'Insurance policies (home/auto/life)', 'Tax returns (last 2 years)', 'List of credit cards + issuer numbers'] },
+  { group: 'Medical', items: ['Immunization records', 'List of medications + dosages', 'Medical history / conditions', 'Health insurance cards'] },
+  { group: 'Property & Legal', items: ['Property deed / lease', 'Vehicle titles + registration', 'Will / power of attorney', 'Household inventory (photos of belongings)'] },
+]
+
+interface DocState { physical: boolean; digital: boolean }
+
+function loadDocChecklist(): Record<string, DocState> {
+  try { return JSON.parse(localStorage.getItem('fenris_doc_checklist') ?? '{}') } catch { return {} }
+}
+
+function DocumentChecklist() {
+  const [state, setState] = useState<Record<string, DocState>>(loadDocChecklist)
+
+  useEffect(() => {
+    try { localStorage.setItem('fenris_doc_checklist', JSON.stringify(state)) } catch {}
+  }, [state])
+
+  function toggle(item: string, field: keyof DocState) {
+    setState(prev => {
+      const current: DocState = prev[item] ?? { physical: false, digital: false }
+      return { ...prev, [item]: { ...current, [field]: !current[field] } }
+    })
+  }
+
+  const allItems = DOC_GROUPS.flatMap(g => g.items)
+  const doneCount = allItems.filter(i => state[i]?.physical || state[i]?.digital).length
+
+  function asText() {
+    const lines = ['IMPORTANT DOCUMENTS CHECKLIST', '']
+    for (const g of DOC_GROUPS) {
+      lines.push(g.group.toUpperCase() + ':')
+      for (const item of g.items) {
+        const s = state[item]
+        const status = s?.physical && s?.digital ? '[physical + digital]' : s?.physical ? '[physical copy]' : s?.digital ? '[digital copy]' : '[ ]'
+        lines.push(`  ${status} ${item}`)
+      }
+      lines.push('')
+    }
+    return lines.join('\n')
+  }
+
+  const [copied, setCopied] = useState(false)
+  function copyList() {
+    navigator.clipboard.writeText(asText()).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
+        Track what you have a physical copy of (in a go-bag or fireproof box) versus a digital copy of (encrypted drive, cloud folder). Saved to this browser only -- nothing is uploaded.
+      </div>
+
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-muted)' }}>
+        {doneCount} of {allItems.length} documents accounted for
+      </div>
+
+      {DOC_GROUPS.map(g => (
+        <div key={g.group}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '8px' }}>{g.group}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)', borderRadius: '6px', overflow: 'hidden' }}>
+            {g.items.map(item => {
+              const s = state[item]
+              return (
+                <div key={item} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '9px 12px', background: 'var(--color-surface)' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--color-text)', flex: 1 }}>{item}</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: '11px', color: s?.physical ? 'var(--color-accent)' : 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+                    <input type="checkbox" checked={!!s?.physical} onChange={() => toggle(item, 'physical')} style={{ accentColor: 'var(--color-accent)', width: '13px', height: '13px' }} />
+                    Physical
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer', fontSize: '11px', color: s?.digital ? 'var(--color-accent)' : 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
+                    <input type="checkbox" checked={!!s?.digital} onChange={() => toggle(item, 'digital')} style={{ accentColor: 'var(--color-accent)', width: '13px', height: '13px' }} />
+                    Digital
+                  </label>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      ))}
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <button onClick={copyList} style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid var(--color-border)', background: copied ? 'rgba(34,197,94,0.1)' : 'transparent', color: copied ? 'var(--color-accent)' : 'var(--color-muted)', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
+          {copied ? 'Copied!' : 'Copy checklist as text'}
+        </button>
+        <button onClick={() => window.print()} style={{ padding: '9px 16px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'transparent', color: 'var(--color-muted)', fontSize: '13px', fontFamily: 'var(--font-display)', fontWeight: 600, cursor: 'pointer' }}>
+          Print
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tool registry ─────────────────────────────────────────────────────────────
 
 const TOOLS = [
@@ -1231,6 +1550,24 @@ const TOOLS = [
     name: 'Caloric Needs Calculator',
     desc: 'Daily caloric requirements by household composition and activity level. Includes 30-day storage estimates.',
     component: <CaloricCalculator />,
+  },
+  {
+    id: 'generator',
+    name: 'Generator & Fuel Calculator',
+    desc: 'Pick what you\'ll run, check it against your generator\'s capacity, and see how much fuel you\'ll actually need.',
+    component: <GeneratorCalculator />,
+  },
+  {
+    id: 'comms_plan',
+    name: 'Communications Plan',
+    desc: 'Out-of-area contact, meeting points, and radio channels -- filled in once, saved to this browser, exportable as text.',
+    component: <CommsPlan />,
+  },
+  {
+    id: 'doc_checklist',
+    name: 'Important Documents Checklist',
+    desc: 'Track which critical documents you have physical and digital copies of -- IDs, insurance, medical, property, legal.',
+    component: <DocumentChecklist />,
   },
 ]
 
