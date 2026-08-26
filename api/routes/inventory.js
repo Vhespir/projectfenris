@@ -10,6 +10,7 @@ export async function inventoryRoutes(app, { pool }) {
     const { rows } = await pool.query(`
       SELECT k.id, k.name, k.type, k.purpose, k.location_label,
              k.weight_limit_g, k.budget_cents, k.notes, k.sort_order,
+             k.household_people, k.household_pets, k.household_days,
              k.created_at, k.updated_at,
              COUNT(i.id)::int                           AS item_count,
              COALESCE(SUM(i.weight_g  * i.qty), 0)::int AS total_weight_g,
@@ -24,15 +25,19 @@ export async function inventoryRoutes(app, { pool }) {
   })
 
   app.post('/inventory/kits', { preHandler: [app.authenticate] }, async (req, reply) => {
-    const { name, type = 'custom', purpose, location_label, weight_limit_g, budget_cents, notes } = req.body ?? {}
+    const { name, type = 'custom', purpose, location_label, weight_limit_g, budget_cents, notes,
+            household_people = 2, household_pets = 0, household_days = 14 } = req.body ?? {}
     if (!name?.trim()) return reply.code(400).send({ error: 'name required' })
     if (!VALID_TYPES.includes(type)) return reply.code(400).send({ error: 'invalid type' })
     const { rows } = await pool.query(`
-      INSERT INTO inventory_kits (user_id, name, type, purpose, location_label, weight_limit_g, budget_cents, notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-      RETURNING id, name, type, purpose, location_label, weight_limit_g, budget_cents, notes, sort_order, created_at, updated_at
+      INSERT INTO inventory_kits (user_id, name, type, purpose, location_label, weight_limit_g, budget_cents, notes,
+                                   household_people, household_pets, household_days)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      RETURNING id, name, type, purpose, location_label, weight_limit_g, budget_cents, notes, sort_order,
+                household_people, household_pets, household_days, created_at, updated_at
     `, [req.user.id, name.trim(), type, purpose?.trim() || null, location_label?.trim() || null,
-        weight_limit_g ? Number(weight_limit_g) : null, budget_cents ? Number(budget_cents) : null, notes?.trim() || null])
+        weight_limit_g ? Number(weight_limit_g) : null, budget_cents ? Number(budget_cents) : null, notes?.trim() || null,
+        Number(household_people) || 2, Number(household_pets) || 0, Number(household_days) || 14])
     return reply.code(201).send({ ...rows[0], item_count: 0, total_weight_g: 0, total_cost_cents: 0 })
   })
 
@@ -41,24 +46,33 @@ export async function inventoryRoutes(app, { pool }) {
     const { rows: existing } = await pool.query('SELECT user_id FROM inventory_kits WHERE id=$1', [id])
     if (!existing.length) return reply.code(404).send({ error: 'Kit not found' })
     if (existing[0].user_id !== req.user.id) return reply.code(403).send({ error: 'Forbidden' })
-    const { name, type, purpose, location_label, weight_limit_g, budget_cents, notes } = req.body ?? {}
+    const { name, type, purpose, location_label, weight_limit_g, budget_cents, notes,
+            household_people, household_pets, household_days } = req.body ?? {}
     if (type && !VALID_TYPES.includes(type)) return reply.code(400).send({ error: 'invalid type' })
     const { rows } = await pool.query(`
       UPDATE inventory_kits SET
-        name           = COALESCE($1, name),
-        type           = COALESCE($2, type),
-        purpose        = COALESCE($3, purpose),
-        location_label = COALESCE($4, location_label),
-        weight_limit_g = COALESCE($5, weight_limit_g),
-        budget_cents   = COALESCE($6, budget_cents),
-        notes          = COALESCE($7, notes),
-        updated_at     = NOW()
-      WHERE id = $8
-      RETURNING id, name, type, purpose, location_label, weight_limit_g, budget_cents, notes, sort_order, updated_at
+        name             = COALESCE($1, name),
+        type             = COALESCE($2, type),
+        purpose          = COALESCE($3, purpose),
+        location_label   = COALESCE($4, location_label),
+        weight_limit_g   = COALESCE($5, weight_limit_g),
+        budget_cents     = COALESCE($6, budget_cents),
+        notes            = COALESCE($7, notes),
+        household_people = COALESCE($8, household_people),
+        household_pets   = COALESCE($9, household_pets),
+        household_days   = COALESCE($10, household_days),
+        updated_at       = NOW()
+      WHERE id = $11
+      RETURNING id, name, type, purpose, location_label, weight_limit_g, budget_cents, notes, sort_order,
+                household_people, household_pets, household_days, updated_at
     `, [name?.trim() || null, type || null, purpose?.trim() ?? null, location_label?.trim() ?? null,
         weight_limit_g !== undefined ? (weight_limit_g ? Number(weight_limit_g) : null) : undefined,
         budget_cents !== undefined ? (budget_cents ? Number(budget_cents) : null) : undefined,
-        notes?.trim() ?? null, id])
+        notes?.trim() ?? null,
+        household_people !== undefined ? Number(household_people) : undefined,
+        household_pets !== undefined ? Number(household_pets) : undefined,
+        household_days !== undefined ? Number(household_days) : undefined,
+        id])
     return rows[0]
   })
 
