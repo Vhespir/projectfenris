@@ -43,140 +43,6 @@ function computeCalorieTargets(adults: number, children: number, elderly: number
   return { adultCals, childCals, elderlyCals, dailyTotal }
 }
 
-// ─── Water Storage Calculator ──────────────────────────────────────────────────
-
-function WaterCalculator({ household, onHouseholdChange }: { household?: Household; onHouseholdChange?: (h: Household) => void } = {}) {
-  const isMobile = useIsMobile()
-  const controlled = !!household
-  const [localPeople, setLocalPeople] = useState(2)
-  const [localPets, setLocalPets] = useState(0)
-  const [localDays, setLocalDays] = useState(14)
-  const [heat, setHeat] = useState(false)
-  const [active, setActive] = useState(false)
-
-  const people = household?.people ?? localPeople
-  const pets = household?.pets ?? localPets
-  const days = household?.days ?? localDays
-  function setPeople(v: number) { onHouseholdChange ? onHouseholdChange({ people: v, pets, days }) : setLocalPeople(v) }
-  function setPets(v: number)   { onHouseholdChange ? onHouseholdChange({ people, pets: v, days }) : setLocalPets(v) }
-  function setDays(v: number)   { onHouseholdChange ? onHouseholdChange({ people, pets, days: v }) : setLocalDays(v) }
-
-  const { totalGallons, drinkingGallons } = computeWaterTargets(people, pets, days, heat, active)
-  const containers55 = Math.ceil(totalGallons / 55)
-  const containers5 = Math.ceil(totalGallons / 5)
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '32px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {controlled ? (
-          <div style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--color-border)', fontSize: '12px', color: 'var(--color-subtle)' }}>
-            Using this cache's household: {people} people{pets > 0 ? `, ${pets} pets` : ''}, {days}-day target. Edit it in the household field above.
-          </div>
-        ) : (
-          <>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div><label style={labelStyle}>People</label><input type="number" min={1} max={20} value={people} onChange={e => setPeople(+e.target.value || 1)} style={inputStyle} /></div>
-              <div><label style={labelStyle}>Pets</label><input type="number" min={0} max={10} value={pets} onChange={e => setPets(+e.target.value || 0)} style={inputStyle} /></div>
-            </div>
-            <div><label style={labelStyle}>Duration (days)</label><input type="number" min={1} max={365} value={days} onChange={e => setDays(+e.target.value || 1)} style={inputStyle} /></div>
-          </>
-        )}
-        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          {[{ label: 'Hot climate / summer', value: heat, set: setHeat }, { label: 'High activity / labor', value: active, set: setActive }].map(({ label, value, set }) => (
-            <label key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--color-muted)' }}>
-              <input type="checkbox" checked={value} onChange={e => set(e.target.checked)} style={{ accentColor: 'var(--color-accent)', width: '14px', height: '14px' }} />{label}
-            </label>
-          ))}
-        </div>
-        <div style={{ padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
-          FEMA baseline: 1 gallon per person per day. Hot or active conditions can triple needs.
-        </div>
-      </div>
-      <div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Results</div>
-        {resultRow('Total water needed', `${totalGallons} gal`, true)}
-        {resultRow('Drinking / cooking', `${drinkingGallons} gal`)}
-        {resultRow('Sanitation / hygiene', `${totalGallons - drinkingGallons} gal`)}
-        <div style={{ marginTop: '16px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Container options</div>
-        {resultRow('55-gallon drums', `${containers55} drum${containers55 !== 1 ? 's' : ''}`)}
-        {resultRow('5-gallon jugs', `${containers5} jug${containers5 !== 1 ? 's' : ''}`)}
-        {resultRow('1-gallon jugs', `${totalGallons} jugs`)}
-      </div>
-    </div>
-  )
-}
-
-// ─── Caloric Needs Calculator ──────────────────────────────────────────────────
-
-function CaloricCalculator({ household }: { household?: Household } = {}) {
-  const isMobile = useIsMobile()
-  const controlled = !!household
-  const [localAdults, setLocalAdults] = useState(2)
-  const [children, setChildren] = useState(0)
-  const [elderly, setElderly] = useState(0)
-  const [activity, setActivity] = useState<ActivityLevel>('moderate')
-
-  // Controlled by a cache's household: that only tracks a total person count,
-  // not an age breakdown, so it's counted as adults at whatever activity
-  // level is picked here.
-  const adults = household?.people ?? localAdults
-  const effectiveChildren = controlled ? 0 : children
-  const effectiveElderly = controlled ? 0 : elderly
-
-  const { adultCals, childCals, elderlyCals, dailyTotal } = computeCalorieTargets(adults, effectiveChildren, effectiveElderly, activity)
-  const cal72h = dailyTotal * 3
-  const cal2wk = dailyTotal * 14
-  const cal30d = dailyTotal * 30
-  const lbsRice30 = Math.round(cal30d / 1650)
-  const lbsBeans30 = Math.round(cal30d / 1500 * 0.3)
-  const lbsOats30 = Math.round(cal30d / 1700 * 0.2)
-
-  return (
-    <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '32px' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        {controlled ? (
-          <div style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--color-border)', fontSize: '12px', color: 'var(--color-subtle)' }}>
-            Using this cache's household: {adults} people, counted as adults. Edit the count in the household field above.
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '12px' }}>
-            <div><label style={labelStyle}>Adults</label><input type="number" min={0} max={20} value={localAdults} onChange={e => setLocalAdults(+e.target.value || 0)} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Children</label><input type="number" min={0} max={20} value={children} onChange={e => setChildren(+e.target.value || 0)} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Elderly (65+)</label><input type="number" min={0} max={20} value={elderly} onChange={e => setElderly(+e.target.value || 0)} style={inputStyle} /></div>
-          </div>
-        )}
-        <div>
-          <label style={labelStyle}>Activity level during emergency</label>
-          <select value={activity} onChange={e => setActivity(e.target.value as typeof activity)} style={inputStyle}>
-            <option value="sedentary">Sedentary (sheltering in place)</option>
-            <option value="light">Light (minimal movement)</option>
-            <option value="moderate">Moderate (evacuating, setting up camp)</option>
-            <option value="heavy">Heavy (physical labor, rescue work)</option>
-          </select>
-        </div>
-        <div style={{ padding: '12px 14px', borderRadius: '6px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', fontSize: '12px', color: '#93C5FD', lineHeight: 1.6 }}>
-          Stress and cold increase caloric needs. Round up rather than down.
-        </div>
-      </div>
-      <div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Daily needs</div>
-        {resultRow('Per adult', `${adultCals.toLocaleString()} cal`)}
-        {children > 0 && resultRow('Per child', `${childCals.toLocaleString()} cal`)}
-        {elderly > 0 && resultRow('Per elderly adult', `${elderlyCals.toLocaleString()} cal`)}
-        {resultRow('Household total / day', `${dailyTotal.toLocaleString()} cal`, true)}
-        <div style={{ marginTop: '16px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Storage targets</div>
-        {resultRow('72-hour kit', `${cal72h.toLocaleString()} cal`)}
-        {resultRow('2-week supply', `${cal2wk.toLocaleString()} cal`)}
-        {resultRow('30-day supply', `${cal30d.toLocaleString()} cal`)}
-        <div style={{ marginTop: '16px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>30-day food estimate</div>
-        {resultRow('White rice (lbs)', `~${lbsRice30} lbs`)}
-        {resultRow('Dried beans (lbs)', `~${lbsBeans30} lbs`)}
-        {resultRow('Oats (lbs)', `~${lbsOats30} lbs`)}
-      </div>
-    </div>
-  )
-}
-
 // ─── Inventory Manager ────────────────────────────────────────────────────────
 
 type KitType = 'edc' | 'bob' | 'ghb' | 'inch' | 'vehicle' | 'home_cache' | 'ifak' | 'trauma' | 'med_kit' | 'comms' | 'power_cache' | 'custom'
@@ -852,18 +718,10 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
           {totalCostCents > 0 && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>${(totalCostCents / 100).toFixed(2)}</span>}
         </div>
 
-        {/* Context: water/food targets, documents, generator, whichever apply to this cache type */}
-        {SUSTAINMENT_TYPES.includes(activeKit.type) && (
-          <>
-            <KitTargetsPanel h={h} />
-            <CollapsiblePanel label="Full water storage calculator">
-              <WaterCalculator household={h} onHouseholdChange={next => updateKitHousehold(activeKit.id, { household_people: next.people, household_pets: next.pets, household_days: next.days })} />
-            </CollapsiblePanel>
-            <CollapsiblePanel label="Full caloric needs calculator">
-              <CaloricCalculator household={h} />
-            </CollapsiblePanel>
-          </>
-        )}
+        {/* Water/food targets, documents, generator, whichever apply to this cache type.
+            No calculator UI here on purpose: the target is just computed
+            from the household and shown, not something you sit and tune. */}
+        {SUSTAINMENT_TYPES.includes(activeKit.type) && <KitTargetsPanel h={h} />}
         {activeKit.type === 'home_cache' && (
           <CollapsiblePanel label="Important documents checklist">
             <DocumentChecklist />
@@ -1665,7 +1523,7 @@ const TOOLS = [
   {
     id: 'inventory',
     name: 'Inventory Manager',
-    desc: 'One tab per cache: EDC, BOB, GHB, INCH, Vehicle, Home Cache. Each one already knows your water and food targets, groups medical and power items into their own sections, and Home Cache adds the documents checklist and generator calculator.',
+    desc: 'Separate tabs for EDC, BOB, GHB, INCH, Vehicle, and Home Cache, each sized for its own household with its own water, food, and medical targets.',
     component: <InventoryHub />,
   },
   {
