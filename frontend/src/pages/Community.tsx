@@ -44,8 +44,6 @@ const CHANNELS: Channel[] = [
   { id: 'general',   label: 'General Discussion',     type: 'community',          category: 'General Discussion' },
 ]
 
-const TOPIC_CHANNEL_IDS = new Set(['gear','food','medical','comms','security','evac','homestead','skills','general'])
-
 const FIELD_REPORT_CATEGORIES = [
   'Weather Event', 'Natural Disaster', 'Infrastructure', 'Civil Unrest',
   'Hazmat or Environmental', 'Medical or Health', 'General Observation',
@@ -505,7 +503,7 @@ export default function Community() {
               onClick={() => { if (!user) navigate('/login'); else setShowForm(v => !v) }}
               style={{
                 padding: '8px 16px', borderRadius: '6px', fontFamily: 'var(--font-display)',
-                fontSize: '13px', fontWeight: 600, cursor: 'pointer', border: 'none',
+                fontSize: '13px', fontWeight: 600, cursor: 'pointer',
                 background: showForm ? 'var(--color-surface)' : 'var(--color-accent)',
                 color: showForm ? 'var(--color-muted)' : '#0A0A0A',
                 border: showForm ? '1px solid var(--color-border)' : 'none',

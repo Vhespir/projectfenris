@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 
 interface RefData {
+  id: number
   type: 'event' | 'news' | 'guide' | 'aar'
   slug: string
   title: string

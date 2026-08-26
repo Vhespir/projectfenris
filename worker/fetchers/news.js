@@ -32,7 +32,7 @@ const DEDICATED_FEEDS = [
   { url: 'https://www.gov.uk/foreign-travel-advice.atom',                               source: 'FCDO',       category: 'travel',        region: null },
   { url: 'https://www.arrl.org/news/rss',                                               source: 'ARRL',       category: 'comms',         region: null },
   { url: 'https://www.epa.gov/rss/epa-newsroom.xml',                                   source: 'EPA',        category: 'environment',   region: null },
-  { url: 'https://kb.cert.org/vuls/bypublished/rss/',                                   source: 'CERT/CC',    category: 'cybersecurity', region: null },
+  // CERT/CC's old kb.cert.org RSS endpoint (https://kb.cert.org/vuls/bypublished/rss/) 404s as of 2026-08 -- removed.
 ]
 
 // General news feeds -- filter by relevance keywords before storing

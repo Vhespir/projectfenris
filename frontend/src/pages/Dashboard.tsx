@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, useMap } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, useDraggable, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { EventLayer, RadarLayer, WeatherAlertLayer, type DisasterEvent } from '../components/MapEventLayer'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -12,6 +13,7 @@ import { useContextDrawer } from '../context/ContextDrawerContext'
 interface NewsItem {
   id: number; source: string; title: string; url: string | null
   summary: string | null; category: string | null; published_at: string | null
+  slug?: string | null; discussion_count?: number
 }
 interface Post {
   id: number; post_type: string; category: string; title: string
@@ -39,10 +41,10 @@ const DEFAULT_PREFS: DashboardPrefs = {
   columns: 2,
   rows: 3,
   slots: {
-    '0': { type: 'alerts',        config: {} },
+    '0': { type: 'live_feed',     config: {} },
     '1': { type: 'map',           config: {} },
-    '2': { type: 'news',          config: {} },
-    '3': { type: 'event_counts',  config: {} },
+    '2': { type: 'event_counts',  config: {} },
+    '3': { type: 'top_guides',    config: {} },
     '4': { type: 'community',     config: {} },
     '5': { type: 'field_reports', config: {} },
   },
@@ -78,6 +80,24 @@ function useCurrentTime() {
   return t
 }
 
+function eventCentroid(geom: DisasterEvent['geometry']): [number, number] | null {
+  if (!geom) return null
+  if (geom.type === 'Point') {
+    const [lon, lat] = (geom as GeoJSON.Point).coordinates
+    return [lat, lon]
+  }
+  let ring: number[][]
+  if (geom.type === 'Polygon') ring = (geom as GeoJSON.Polygon).coordinates[0]
+  else if (geom.type === 'MultiPolygon') ring = (geom as GeoJSON.MultiPolygon).coordinates[0][0]
+  else return null
+  const lats = ring.map(c => c[1])
+  const lons = ring.map(c => c[0])
+  return [
+    (Math.min(...lats) + Math.max(...lats)) / 2,
+    (Math.min(...lons) + Math.max(...lons)) / 2,
+  ]
+}
+
 // ─── Map helpers ──────────────────────────────────────────────────────────────
 
 function GeolocateUser() {
@@ -97,81 +117,90 @@ function GeolocateUser() {
 // ─── Panel wrapper ────────────────────────────────────────────────────────────
 
 function Panel({
-  title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure, onMoveStart, isMoving,
-  onSpanChange, currentSpan, maxSpan, onHeightChange, currentMinHeight,
+  title, link, linkLabel, editMode, children, onPickSlot, onClear, onConfigure,
+  dragHandleProps, isDropTarget,
+  onResize, currentSpan, maxSpan, currentMinHeight,
 }: {
   title: string; link?: string; linkLabel?: string
   editMode: boolean; children: React.ReactNode
   onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
-  onMoveStart?: () => void; isMoving?: boolean
-  onSpanChange?: (s: number) => void; currentSpan?: number; maxSpan?: number
-  onHeightChange?: (h: number) => void; currentMinHeight?: number
+  dragHandleProps?: { attributes: ReturnType<typeof useDraggable>['attributes']; listeners: ReturnType<typeof useDraggable>['listeners'] }
+  isDropTarget?: boolean
+  onResize?: (span: number, minHeight: number) => void; currentSpan?: number; maxSpan?: number; currentMinHeight?: number
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ startY: number; startH: number } | null>(null)
-  const onHeightChangeRef = useRef(onHeightChange)
-  onHeightChangeRef.current = onHeightChange
+  const dragRef = useRef<{ startX: number; startY: number; startW: number; startH: number; startSpan: number } | null>(null)
+  const onResizeRef = useRef(onResize)
+  onResizeRef.current = onResize
+  const [resizing, setResizing] = useState(false)
+
+  const span = currentSpan ?? 1
+  const maxSpanVal = maxSpan ?? 1
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
       if (!dragRef.current || !panelRef.current) return
-      const newH = Math.max(80, dragRef.current.startH + (e.clientY - dragRef.current.startY))
+      const { startX, startY, startW, startH, startSpan } = dragRef.current
+      const newH = Math.max(80, startH + (e.clientY - startY))
       panelRef.current.style.minHeight = `${newH}px`
+      if (maxSpanVal > 1) {
+        const colWidth = startW / startSpan
+        const deltaSpan = Math.round((e.clientX - startX) / colWidth)
+        const newSpan = Math.min(maxSpanVal, Math.max(1, startSpan + deltaSpan))
+        panelRef.current.dataset.pendingSpan = String(newSpan)
+      }
     }
     function onMouseUp(e: MouseEvent) {
-      if (!dragRef.current) return
-      const newH = Math.max(80, dragRef.current.startH + (e.clientY - dragRef.current.startY))
-      onHeightChangeRef.current?.(newH)
+      if (!dragRef.current || !panelRef.current) return
+      const { startX, startY, startW, startH, startSpan } = dragRef.current
+      const newH = Math.max(80, startH + (e.clientY - startY))
+      let newSpan = startSpan
+      if (maxSpanVal > 1) {
+        const colWidth = startW / startSpan
+        const deltaSpan = Math.round((e.clientX - startX) / colWidth)
+        newSpan = Math.min(maxSpanVal, Math.max(1, startSpan + deltaSpan))
+      }
+      onResizeRef.current?.(newSpan, newH)
       dragRef.current = null
+      setResizing(false)
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
     return () => { window.removeEventListener('mousemove', onMouseMove); window.removeEventListener('mouseup', onMouseUp) }
-  }, [])
+  }, [maxSpanVal])
 
   const eBtnStyle: React.CSSProperties = {
     background: 'transparent', border: '1px solid var(--color-border)', borderRadius: '3px',
     color: 'var(--color-muted)', cursor: 'pointer', fontSize: '12px', padding: '1px 6px',
     fontFamily: 'var(--font-mono)', lineHeight: 1.4,
   }
-  const span = currentSpan ?? 1
-  const maxSpanVal = maxSpan ?? 1
 
   return (
     <div
       ref={panelRef}
       style={{
-        border: `1px solid ${isMoving ? 'var(--color-accent)' : 'var(--color-border)'}`,
+        border: `1px solid ${isDropTarget ? 'var(--color-accent)' : 'var(--color-border)'}`,
         borderRadius: '8px', background: 'var(--color-surface)', overflow: 'hidden',
-        boxShadow: isMoving ? '0 0 0 2px rgba(34,197,94,0.2)' : 'none',
+        boxShadow: isDropTarget ? '0 0 0 2px rgba(34,197,94,0.2)' : 'none',
         minHeight: currentMinHeight ? `${currentMinHeight}px` : undefined,
-        display: 'flex', flexDirection: 'column',
+        display: 'flex', flexDirection: 'column', position: 'relative',
       }}
     >
       <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '8px', background: 'rgba(0,0,0,0.2)', flexShrink: 0 }}>
+        {editMode && dragHandleProps && (
+          <span
+            {...dragHandleProps.attributes}
+            {...dragHandleProps.listeners}
+            title="Drag to move"
+            style={{ cursor: 'grab', color: 'var(--color-subtle)', fontSize: '13px', lineHeight: 1, letterSpacing: '-1px', touchAction: 'none', flexShrink: 0, padding: '2px' }}
+          >
+            ⠿
+          </span>
+        )}
         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', flex: 1 }}>{title}</span>
         {editMode ? (
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             {onConfigure && <button onClick={onConfigure} style={eBtnStyle}>Config</button>}
-            {maxSpanVal > 1 && onSpanChange && (
-              <div style={{ display: 'flex', gap: '2px', alignItems: 'center' }}>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', marginRight: '1px' }}>W:</span>
-                {Array.from({ length: maxSpanVal }, (_, i) => i + 1).map(s => (
-                  <button key={s} onClick={e => { e.stopPropagation(); onSpanChange(s) }}
-                    style={{ ...eBtnStyle, padding: '1px 5px', fontSize: '11px', color: s === span ? 'var(--color-accent)' : 'var(--color-muted)', borderColor: s === span ? 'var(--color-accent)' : 'var(--color-border)' }}>
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-            {onMoveStart && (
-              <button
-                onClick={e => { e.stopPropagation(); onMoveStart() }}
-                style={{ ...eBtnStyle, color: isMoving ? 'var(--color-accent)' : 'var(--color-muted)', borderColor: isMoving ? 'var(--color-accent)' : 'var(--color-border)' }}
-              >
-                {isMoving ? 'Moving...' : 'Move'}
-              </button>
-            )}
             <button onClick={e => { e.stopPropagation(); onPickSlot() }} style={eBtnStyle}>Change</button>
             <button onClick={e => { e.stopPropagation(); onClear() }} style={{ ...eBtnStyle, color: '#EF4444', borderColor: 'rgba(239,68,68,0.3)' }}>Remove</button>
           </div>
@@ -182,15 +211,26 @@ function Panel({
         ) : null}
       </div>
       <div style={{ flex: 1 }}>{children}</div>
-      {editMode && onHeightChange && (
+      {editMode && onResize && (
         <div
           onMouseDown={e => {
             e.preventDefault()
-            dragRef.current = { startY: e.clientY, startH: panelRef.current?.offsetHeight ?? 120 }
+            setResizing(true)
+            dragRef.current = {
+              startX: e.clientX, startY: e.clientY,
+              startW: panelRef.current?.offsetWidth ?? 200, startH: panelRef.current?.offsetHeight ?? 120,
+              startSpan: span,
+            }
           }}
-          style={{ height: '8px', cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', borderTop: '1px solid var(--color-border)', flexShrink: 0 }}
+          style={{
+            position: 'absolute', bottom: 0, right: 0, width: '18px', height: '18px',
+            cursor: maxSpanVal > 1 ? 'nwse-resize' : 'ns-resize', zIndex: 5,
+            display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-end', padding: '3px',
+          }}
         >
-          <div style={{ width: '28px', height: '2px', borderRadius: '1px', background: 'rgba(255,255,255,0.15)' }} />
+          <svg width="10" height="10" viewBox="0 0 10 10" style={{ opacity: resizing ? 1 : 0.35 }}>
+            <path d="M9 1 L1 9 M9 5 L5 9 M9 9 L9 9" stroke="var(--color-accent)" strokeWidth="1.4" strokeLinecap="round" />
+          </svg>
         </div>
       )}
     </div>
@@ -199,94 +239,200 @@ function Panel({
 
 // ─── Empty slot ───────────────────────────────────────────────────────────────
 
-function EmptySlot({ editMode, onClick, isMoveTarget }: { editMode: boolean; onClick: () => void; isMoveTarget?: boolean }) {
+function EmptySlot({ editMode, onClick, isDropTarget, dropRef }: { editMode: boolean; onClick: () => void; isDropTarget?: boolean; dropRef?: (node: HTMLElement | null) => void }) {
   const [hovered, setHovered] = useState(false)
-  const active = hovered || isMoveTarget
+  const active = hovered || isDropTarget
   return (
     <div
+      ref={dropRef}
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        border: `1px dashed ${isMoveTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
+        border: `1px dashed ${isDropTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.07)'}`,
         borderRadius: '8px',
         minHeight: '120px',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
         gap: '7px',
-        cursor: (editMode || isMoveTarget) ? 'pointer' : 'default',
-        background: isMoveTarget ? 'rgba(34,197,94,0.04)' : active ? 'rgba(255,255,255,0.02)' : 'transparent',
+        cursor: editMode ? 'pointer' : 'default',
+        background: isDropTarget ? 'rgba(34,197,94,0.06)' : active ? 'rgba(255,255,255,0.02)' : 'transparent',
         transition: 'border-color 0.12s, background 0.12s',
       }}
     >
-      <span style={{ fontSize: '16px', color: isMoveTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', lineHeight: 1, transition: 'color 0.12s' }}>
-        {isMoveTarget ? '⇅' : '+'}
+      <span style={{ fontSize: '16px', color: isDropTarget ? 'rgba(34,197,94,0.6)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)', lineHeight: 1, transition: 'color 0.12s' }}>
+        {isDropTarget ? '⇩' : '+'}
       </span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: isMoveTarget ? 'rgba(34,197,94,0.5)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', letterSpacing: '0.08em', transition: 'color 0.12s' }}>
-        {isMoveTarget ? 'Move here.' : 'Add a panel.'}
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: isDropTarget ? 'rgba(34,197,94,0.6)' : active ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', letterSpacing: '0.08em', transition: 'color 0.12s' }}>
+        {isDropTarget ? 'Drop here' : 'Add a panel.'}
       </span>
     </div>
   )
 }
 
-// ─── Widget: Active Alerts ────────────────────────────────────────────────────
+// ─── Widget: Live Feed (events + news + community reports, combined) ─────────
 
-function AlertsContent({ data }: { data: DashData }) {
+interface LiveFeedRow {
+  kind: 'event' | 'news' | 'post'
+  key: string
+  title: string
+  badge: string
+  color: string
+  timeIso: string | null
+  slug?: string | null
+  discussionCount?: number
+  centroid?: [number, number] | null
+  url?: string | null
+  postId?: number
+}
+
+function LiveFeedContent({ data, config, onSetConfig }: {
+  data: DashData
+  config?: Record<string, unknown>
+  onSetConfig?: (u: Record<string, unknown>) => void
+}) {
   const { open: openDrawer } = useContextDrawer()
-  const severeOrExtreme = data.events
-    .filter(e => e.severity === 'Extreme' || e.severity === 'Severe')
-    .sort((a, b) => (a.severity === 'Extreme' ? 0 : 1) - (b.severity === 'Extreme' ? 0 : 1))
+  const navigate = useNavigate()
 
-  // Cap how many alerts from the same source+event_type can occupy the panel.
-  // MeteoAlarm in particular issues one alert per French department for the
-  // same weather system (e.g. "Vigilance orange orages"), so a single storm
-  // can otherwise fill every visible slot with near-duplicates of itself and
-  // crowd out everything else -- a USGS earthquake, an NWS tornado warning.
-  const seenCounts = new Map<string, number>()
-  const pinned: typeof severeOrExtreme = []
-  const overflow: typeof severeOrExtreme = []
-  for (const e of severeOrExtreme) {
-    const key = `${e.source}:${e.event_type}`
-    const count = seenCounts.get(key) ?? 0
-    seenCounts.set(key, count + 1)
-    ;(count < 3 ? pinned : overflow).push(e)
-  }
-  pinned.push(...overflow)
+  const showEvents = config?.showEvents !== false
+  const showNews   = config?.showNews   !== false
+  const showPosts  = config?.showPosts  !== false
+  const severeOnly = config?.severeOnly !== false
+  const configOpen = config?._open === true
+
+  const rows = useMemo<LiveFeedRow[]>(() => {
+    const out: LiveFeedRow[] = []
+    if (showEvents) {
+      // Same anti-flood cap as before: don't let one source+type (e.g. a
+      // MeteoAlarm storm issuing one alert per French department) bury
+      // everything else in near-duplicates.
+      const seenCounts = new Map<string, number>()
+      for (const e of data.events) {
+        if (severeOnly && e.severity !== 'Extreme' && e.severity !== 'Severe') continue
+        const dupKey = `${e.source}:${e.event_type}`
+        const count = seenCounts.get(dupKey) ?? 0
+        seenCounts.set(dupKey, count + 1)
+        if (count >= 3) continue
+        out.push({
+          kind: 'event', key: `e-${e.id}`, title: e.title,
+          badge: `${e.severity.toUpperCase()} · ${e.event_type.replace(/_/g, ' ')}`,
+          color: SEV_COLOR[e.severity] ?? '#71717A',
+          timeIso: e.fetched_at, slug: e.slug, discussionCount: e.discussion_count,
+          centroid: eventCentroid(e.geometry),
+        })
+      }
+    }
+    if (showNews) {
+      for (const n of data.news) {
+        out.push({
+          kind: 'news', key: `n-${n.id}`, title: n.title,
+          badge: n.source, color: '#3B82F6',
+          timeIso: n.published_at, slug: n.slug, discussionCount: n.discussion_count, url: n.url,
+        })
+      }
+    }
+    if (showPosts) {
+      for (const p of data.posts) {
+        if (p.post_type !== 'field_report' && p.post_type !== 'self_reported_news') continue
+        out.push({
+          kind: 'post', key: `p-${p.id}`, title: p.title,
+          badge: POST_TYPE_LABEL[p.post_type] ?? p.post_type,
+          color: POST_TYPE_COLOR[p.post_type] ?? '#71717A',
+          timeIso: p.created_at, postId: p.id,
+        })
+      }
+    }
+    return out.sort((a, b) => new Date(b.timeIso ?? 0).getTime() - new Date(a.timeIso ?? 0).getTime())
+  }, [data, showEvents, showNews, showPosts, severeOnly])
+
+  const configPanel = configOpen && onSetConfig ? (
+    <div style={{ padding: '12px 14px', background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Show</div>
+      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        {([
+          ['showEvents', showEvents, 'Events'],
+          ['showNews', showNews, 'News'],
+          ['showPosts', showPosts, 'Community'],
+        ] as const).map(([key, active, label]) => (
+          <button key={key} onClick={() => onSetConfig({ [key]: !active })}
+            style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
+              border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
+              background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
+              color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {showEvents && (
+        <button onClick={() => onSetConfig({ severeOnly: !severeOnly })}
+          style={{ alignSelf: 'flex-start', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
+            border: `1px solid ${severeOnly ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: severeOnly ? 'rgba(34,197,94,0.1)' : 'transparent',
+            color: severeOnly ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+          {severeOnly ? '✓ ' : ''}Severe/Extreme events only
+        </button>
+      )}
+    </div>
+  ) : null
 
   if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
 
-  if (pinned.length === 0) return (
-    <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#22C55E', display: 'inline-block', flexShrink: 0 }} />
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#22C55E', letterSpacing: '0.06em' }}>NO SEVERE OR EXTREME ALERTS ACTIVE</span>
+  if (rows.length === 0) return (
+    <div>
+      <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#22C55E', display: 'inline-block', flexShrink: 0 }} />
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#22C55E', letterSpacing: '0.06em' }}>NOTHING TO SHOW</span>
+      </div>
+      {configPanel}
     </div>
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
-      {pinned.slice(0, 10).map(e => {
-        const color = SEV_COLOR[e.severity] ?? '#F59E0B'
-        const p = (e.properties ?? {}) as Record<string, string>
-        return (
-          <div key={e.id} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', background: 'var(--color-surface)', borderLeft: `3px solid ${color}` }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color, textTransform: 'uppercase', letterSpacing: '0.06em', flexShrink: 0 }}>{e.severity}</span>
-            <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</span>
-            {p.areaDesc && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0, maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.areaDesc.split(';')[0]}</span>}
-            {e.slug && (
-              <button
-                onClick={ev => { ev.stopPropagation(); openDrawer(e.slug!, 'event') }}
-                style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.06em', flexShrink: 0, padding: 0 }}
-              >
-                #{e.slug}
-              </button>
+    <div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+        {rows.slice(0, 10).map(row => (
+          <div key={row.key} style={{ background: 'var(--color-surface)', padding: '9px 14px', borderLeft: `3px solid ${row.color}` }}>
+            <div
+              onClick={() => {
+                if (row.kind === 'post' && row.postId) navigate(`/post/${row.postId}`)
+                else if (row.kind === 'news' && row.url) window.open(row.url, '_blank', 'noopener,noreferrer')
+              }}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: (row.kind === 'post' || (row.kind === 'news' && row.url)) ? 'pointer' : 'default' }}
+            >
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: row.color, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {row.badge}
+              </span>
+              <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
+              {row.timeIso && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{timeAgo(row.timeIso)}</span>}
+            </div>
+            {(row.centroid || row.slug) && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '5px' }}>
+                {row.centroid && (
+                  <button
+                    onClick={e => { e.stopPropagation(); navigate('/map', { state: { flyTo: { lat: row.centroid![0], lon: row.centroid![1] } } }) }}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.04em', padding: 0 }}
+                  >
+                    Map
+                  </button>
+                )}
+                {row.slug && (
+                  <button
+                    onClick={e => { e.stopPropagation(); openDrawer(row.slug!, row.kind === 'event' ? 'event' : 'news') }}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.04em', padding: 0 }}
+                  >
+                    {row.discussionCount ? `${row.discussionCount} discussion${row.discussionCount !== 1 ? 's' : ''}` : 'Discuss'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
-        )
-      })}
-      {pinned.length > 10 && (
+        ))}
+      </div>
+      {rows.length > 10 && (
         <Link to="/feed" style={{ display: 'block', padding: '10px 14px', background: 'var(--color-surface)', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)', textDecoration: 'none', textAlign: 'center' }}>
-          +{pinned.length - 10} more active alerts
+          +{rows.length - 10} more in the full feed
         </Link>
       )}
+      {configPanel}
     </div>
   )
 }
@@ -424,99 +570,6 @@ function EventCountsContent({ data }: { data: DashData }) {
           </div>
         </div>
       )}
-    </div>
-  )
-}
-
-// ─── Widget: Latest News ──────────────────────────────────────────────────────
-
-const NEWS_CATS: [string, string][] = [
-  ['all',            'All'],
-  ['emergency',      'Emergency'],
-  ['health',         'Health'],
-  ['cybersecurity',  'Cyber'],
-  ['recall',         'Recalls'],
-  ['travel',         'Travel'],
-  ['nuclear',        'Nuclear'],
-  ['hurricane',      'Hurricane'],
-  ['environment',    'Environment'],
-  ['science',        'Science'],
-]
-
-function NewsContent({ data, config, onSetConfig }: {
-  data: DashData
-  config?: Record<string, unknown>
-  onSetConfig?: (u: Record<string, unknown>) => void
-}) {
-  const category = (config?.category as string | undefined) || 'all'
-  const configOpen = config?._open === true
-  const [filteredNews, setFilteredNews] = useState<NewsItem[] | null>(null)
-  const [filterLoading, setFilterLoading] = useState(false)
-
-  useEffect(() => {
-    if (category === 'all') { setFilteredNews(null); return }
-    setFilterLoading(true)
-    fetch(`/api/news?category=${category}&limit=10`)
-      .then(r => r.json())
-      .then(d => { setFilteredNews(Array.isArray(d) ? d : []); setFilterLoading(false) })
-      .catch(() => { setFilteredNews([]); setFilterLoading(false) })
-  }, [category])
-
-  const displayNews = filteredNews ?? data.news
-  const isLoading = category === 'all' ? data.loading : filterLoading
-
-  const configPanel = configOpen && onSetConfig ? (
-    <div style={{ padding: '12px 14px', background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)' }}>
-      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px' }}>Filter by Category</div>
-      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-        {NEWS_CATS.map(([val, lbl]) => {
-          const active = val === 'all' ? category === 'all' : category === val
-          return (
-            <button key={val}
-              onClick={() => onSetConfig({ category: val === 'all' ? undefined : val, _open: true })}
-              style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
-                border: `1px solid ${active ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                background: active ? 'rgba(34,197,94,0.1)' : 'transparent',
-                color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
-              {lbl}
-            </button>
-          )
-        })}
-      </div>
-    </div>
-  ) : null
-
-  if (isLoading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
-
-  if (!displayNews.length) return (
-    <div>
-      <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>
-        No news items{category !== 'all' ? ` in "${category}"` : ''}.
-        {category !== 'all' && <div style={{ marginTop: '6px', fontSize: '11px' }}>Try a different category below.</div>}
-      </div>
-      {configPanel}
-    </div>
-  )
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
-      {displayNews.slice(0, 8).map(item => (
-        <a key={item.id} href={item.url ?? '#'} target="_blank" rel="noopener noreferrer"
-          style={{ textDecoration: 'none', display: 'block', background: 'var(--color-surface)', padding: '11px 14px' }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-elevated)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'var(--color-surface)')}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '3px' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-accent)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{item.source}</span>
-            {category === 'all' && (
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{item.category}</span>
-            )}
-            {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
-          </div>
-          <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.4 }}>{item.title}</div>
-        </a>
-      ))}
-      {configPanel}
     </div>
   )
 }
@@ -1372,12 +1425,11 @@ interface PanelDef {
 }
 
 const PANEL_DEFS: PanelDef[] = [
-  { id: 'alerts',           label: 'Active Alerts',      description: 'Severe and Extreme events from all sources',          category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed' },
+  { id: 'live_feed',        label: 'Live Feed',           description: 'Events, news, and community reports in one filterable stream, with map and discuss links', category: 'Situational Awareness', link: '/feed', linkLabel: 'View feed', configurable: true },
   { id: 'map',              label: 'Live Map',            description: 'Interactive map with live event markers',             category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
   { id: 'event_counts',     label: 'Event Summary',       description: 'Active event counts by severity, source, and type',  category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed' },
   { id: 'radar_widget',     label: 'Radar',               description: 'Live weather radar overlay',                         category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
   { id: 'storm_threats',    label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories',             category: 'Situational Awareness' },
-  { id: 'news',             label: 'Latest News',         description: 'Verified news from curated sources',                 category: 'News & Intel',          link: '/feed',       linkLabel: 'View all', configurable: true },
   { id: 'space_weather',    label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts', category: 'News & Intel' },
   { id: 'cisa_alerts',      label: 'CISA Alerts',         description: 'Cybersecurity advisories and alerts from CISA',     category: 'News & Intel' },
   { id: 'travel_advisories',label: 'Travel Advisories',   description: 'US State Department travel advisories by country',  category: 'News & Intel' },
@@ -1406,10 +1458,9 @@ function renderPanelContent(
   onSetConfig?: (update: Record<string, unknown>) => void,
 ) {
   switch (type) {
-    case 'alerts':           return <AlertsContent data={data} />
+    case 'live_feed':        return <LiveFeedContent data={data} config={config} onSetConfig={onSetConfig} />
     case 'map':              return <MapContent data={data} />
     case 'event_counts':     return <EventCountsContent data={data} />
-    case 'news':             return <NewsContent data={data} config={config} onSetConfig={onSetConfig} />
     case 'community':        return <CommunityContent data={data} />
     case 'field_reports':    return <FieldReportsContent data={data} />
     case 'quick_actions':    return <QuickActionsContent user={user} />
@@ -1498,6 +1549,57 @@ function ConfirmDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCance
   )
 }
 
+// ─── Slot (draggable/droppable grid cell) ─────────────────────────────────────
+
+function DashSlot({
+  slotKey, slot, def, editMode, span, numCols, activeDragKey,
+  onPickSlot, onClear, onConfigure, onResize, onSetConfig, data, user,
+}: {
+  slotKey: string; slot: SlotEntry | null; def: PanelDef | null | undefined
+  editMode: boolean; span: number; numCols: number; activeDragKey: string | null
+  onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
+  onResize: (span: number, minHeight: number) => void
+  onSetConfig: (u: Record<string, unknown>) => void
+  data: DashData; user: { username: string } | null
+}) {
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: slotKey, disabled: !editMode || !slot })
+  const { setNodeRef: setDropRef, isOver } = useDroppable({ id: slotKey, disabled: !editMode })
+  const spanStyle: React.CSSProperties = span > 1 ? { gridColumn: `span ${span}` } : {}
+  const isDropTarget = isOver && activeDragKey !== null && activeDragKey !== slotKey
+
+  const setRefs = (node: HTMLElement | null) => { setDragRef(node); setDropRef(node) }
+
+  if (!slot || !def) {
+    return (
+      <div style={spanStyle}>
+        <EmptySlot editMode={editMode} isDropTarget={isDropTarget} dropRef={setRefs} onClick={onPickSlot} />
+      </div>
+    )
+  }
+
+  return (
+    <div ref={setRefs} style={{ position: 'relative', opacity: isDragging ? 0.35 : 1, ...spanStyle }}>
+      <Panel
+        title={def.label}
+        link={!editMode ? def.link : undefined}
+        linkLabel={def.linkLabel}
+        editMode={editMode}
+        onPickSlot={onPickSlot}
+        onClear={onClear}
+        onConfigure={onConfigure}
+        dragHandleProps={editMode ? { attributes, listeners } : undefined}
+        isDropTarget={isDropTarget}
+        currentSpan={span}
+        maxSpan={numCols}
+        onResize={onResize}
+        currentMinHeight={typeof slot.config.minHeight === 'number' ? slot.config.minHeight : undefined}
+      >
+        {renderPanelContent(slot.type, data, user, slot.config, onSetConfig)}
+      </Panel>
+    </div>
+  )
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -1516,7 +1618,8 @@ export default function Dashboard() {
   const [editMode, setEditMode] = useState(false)
   const [pickerSlot, setPickerSlot] = useState<string | null>(null)
   const [confirmColumns, setConfirmColumns] = useState<ColMode | null>(null)
-  const [movingSlot, setMovingSlot] = useState<string | null>(null)
+  const [activeDragKey, setActiveDragKey] = useState<string | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   const hydratedRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -1525,8 +1628,8 @@ export default function Dashboard() {
     async function fetchData() {
       const [evs, nws, psts] = await Promise.all([
         fetch('/api/events?limit=500').then(r => r.json()).catch(() => []),
-        fetch('/api/news?limit=10').then(r => r.json()).catch(() => []),
-        fetch('/api/posts?limit=20').then(r => r.json()).catch(() => []),
+        fetch('/api/news?limit=100').then(r => r.json()).catch(() => []),
+        fetch('/api/posts?limit=50').then(r => r.json()).catch(() => []),
       ])
       setEvents(Array.isArray(evs) ? evs : [])
       setNews(Array.isArray(nws) ? nws : [])
@@ -1565,7 +1668,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (editMode) return
-    setMovingSlot(null)
     setSlots(prev => {
       const next = { ...prev }
       let changed = false
@@ -1579,14 +1681,6 @@ export default function Dashboard() {
       return changed ? next : prev
     })
   }, [editMode])
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') setMovingSlot(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
 
   const data: DashData = { events, news, posts, loading }
   const severeCount = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
@@ -1640,63 +1734,48 @@ export default function Dashboard() {
 
   function swapSlots(a: string, b: string) {
     setSlots(prev => ({ ...prev, [a]: prev[b] ?? null, [b]: prev[a] ?? null }))
-    setMovingSlot(null)
+  }
+
+  function handleDragStart(e: DragStartEvent) {
+    setActiveDragKey(String(e.active.id))
+  }
+  function handleDragEnd(e: DragEndEvent) {
+    setActiveDragKey(null)
+    if (!e.over) return
+    const a = String(e.active.id), b = String(e.over.id)
+    if (a !== b) swapSlots(a, b)
   }
 
   function renderSlot(key: string) {
     const slot = slots[key] ?? null
     const def = slot ? PANEL_DEFS.find(p => p.id === slot.type) : null
-    const isMoving = movingSlot === key
-    const isMoveTarget = movingSlot !== null && movingSlot !== key
     const numCols = typeof columns === 'number' ? columns : 2
     const span = typeof slot?.config?.span === 'number' ? Math.min(slot.config.span, numCols) : 1
-    const spanStyle: React.CSSProperties = span > 1 ? { gridColumn: `span ${span}` } : {}
-
-    if (!slot || !def) {
-      return (
-        <div key={key} style={spanStyle}>
-          <EmptySlot
-            editMode={editMode}
-            isMoveTarget={isMoveTarget}
-            onClick={() => { if (isMoveTarget) swapSlots(movingSlot!, key); else if (editMode) setPickerSlot(key) }}
-          />
-        </div>
-      )
-    }
-
-    const onConfigure = def.configurable
-      ? () => setSlotConfig(key, { _open: !slot.config._open })
-      : undefined
 
     return (
-      <div key={key} style={{ position: 'relative', ...spanStyle }}>
-        <Panel
-          title={def.label}
-          link={!editMode ? def.link : undefined}
-          linkLabel={def.linkLabel}
-          editMode={editMode}
-          onPickSlot={() => setPickerSlot(key)}
-          onClear={() => setSlots(prev => ({ ...prev, [key]: null }))}
-          onConfigure={onConfigure}
-          onMoveStart={() => setMovingSlot(isMoving ? null : key)}
-          isMoving={isMoving}
-          currentSpan={span}
-          maxSpan={numCols}
-          onSpanChange={s => setSlotConfig(key, { span: s })}
-          currentMinHeight={typeof slot.config.minHeight === 'number' ? slot.config.minHeight : undefined}
-          onHeightChange={h => setSlotConfig(key, { minHeight: h })}
-        >
-          {renderPanelContent(slot.type, data, user, slot.config, u => setSlotConfig(key, u))}
-        </Panel>
-        {isMoveTarget && (
-          <div
-            onClick={() => swapSlots(movingSlot!, key)}
-            style={{ position: 'absolute', inset: 0, borderRadius: '8px', cursor: 'pointer', border: '1px dashed rgba(34,197,94,0.45)', background: 'rgba(34,197,94,0.04)', zIndex: 10 }}
-          />
-        )}
-      </div>
+      <DashSlot
+        key={key}
+        slotKey={key}
+        slot={slot}
+        def={def}
+        editMode={editMode}
+        span={span}
+        numCols={numCols}
+        activeDragKey={activeDragKey}
+        onPickSlot={() => setPickerSlot(key)}
+        onClear={() => setSlots(prev => ({ ...prev, [key]: null }))}
+        onConfigure={def?.configurable ? () => setSlotConfig(key, { _open: !slot!.config._open }) : undefined}
+        onResize={(s, h) => setSlotConfig(key, { span: s, minHeight: h })}
+        onSetConfig={u => setSlotConfig(key, u)}
+        data={data}
+        user={user}
+      />
     )
   }
+
+  const activeDragLabel = activeDragKey != null
+    ? PANEL_DEFS.find(p => p.id === slots[activeDragKey]?.type)?.label
+    : null
 
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase()
   const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -1765,38 +1844,52 @@ export default function Dashboard() {
         )}
       </div>
 
-      {movingSlot !== null && (
+      {editMode && (
         <div style={{ background: 'rgba(34,197,94,0.08)', borderBottom: '1px solid rgba(34,197,94,0.2)', padding: '6px 24px', textAlign: 'center' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(34,197,94,0.8)', letterSpacing: '0.08em' }}>
-            Click any slot to move the panel there. Press Esc to cancel.
+            Drag the ⠿ handle to move a panel. Drag the corner to resize.
           </span>
         </div>
       )}
 
       <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '24px' }}>
-        {columns === 'focus' && !isMobile ? (
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px', alignItems: 'start' }}>
-            {renderSlot('0')}
+        <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveDragKey(null)}>
+          {columns === 'focus' && !isMobile ? (
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '14px', alignItems: 'start' }}>
+              {renderSlot('0')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                {[1, 2, 3].map(i => renderSlot(String(i)))}
+              </div>
+            </div>
+          ) : columns === 'focus' && isMobile ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {[1, 2, 3].map(i => renderSlot(String(i)))}
+              {[0, 1, 2, 3].map(i => renderSlot(String(i)))}
             </div>
-          </div>
-        ) : columns === 'focus' && isMobile ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {[0, 1, 2, 3].map(i => renderSlot(String(i)))}
-          </div>
-        ) : isMobile ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            {Array.from({ length: rows * (columns as number) }, (_, i) => renderSlot(String(i)))}
-          </div>
-        ) : (() => {
-          const numCols = columns as number
-          return (
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: '14px', alignItems: 'start' }}>
-              {Array.from({ length: rows * numCols }, (_, i) => renderSlot(String(i)))}
+          ) : isMobile ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {Array.from({ length: rows * (columns as number) }, (_, i) => renderSlot(String(i)))}
             </div>
-          )
-        })()}
+          ) : (() => {
+            const numCols = columns as number
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${numCols}, 1fr)`, gap: '14px', alignItems: 'start' }}>
+                {Array.from({ length: rows * numCols }, (_, i) => renderSlot(String(i)))}
+              </div>
+            )
+          })()}
+          <DragOverlay>
+            {activeDragLabel ? (
+              <div style={{
+                padding: '8px 16px', borderRadius: '6px', border: '1px solid var(--color-accent)',
+                background: 'var(--color-surface-elevated)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-accent)',
+                cursor: 'grabbing',
+              }}>
+                {activeDragLabel}
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
 
         {columns !== 'focus' && !isMobile && editMode && (() => {
           const numCols = columns as number
