@@ -32,6 +32,7 @@ const CHANNELS: Channel[] = [
   { id: 'all',       label: 'All Posts',             type: null,                 category: null },
   { id: 'field',     label: 'Field Reports',          type: 'field_report',       category: null },
   { id: 'news',      label: 'News Reports',           type: 'self_reported_news', category: null },
+  { id: 'aar',       label: 'After Action Reports',  type: 'aar',                category: null },
   { id: 'gear',      label: 'Gear and Equipment',     type: 'community',          category: 'Gear and Equipment' },
   { id: 'food',      label: 'Food and Water',         type: 'community',          category: 'Food and Water' },
   { id: 'medical',   label: 'Medical',                type: 'community',          category: 'Medical and First Aid' },
@@ -54,11 +55,68 @@ const TYPE_COLOR: Record<string, string> = {
   community:          'var(--color-info)',
   field_report:       'var(--color-warning)',
   self_reported_news: 'var(--color-accent)',
+  aar:                'var(--color-danger)',
 }
 const TYPE_LABEL: Record<string, string> = {
   community:          'Community',
   field_report:       'Field Report',
   self_reported_news: 'News Report',
+  aar:                'After Action Report',
+}
+
+const AAR_INCIDENT_TYPES = [
+  { value: 'hurricane',    label: 'Hurricane' },
+  { value: 'earthquake',   label: 'Earthquake' },
+  { value: 'wildfire',     label: 'Wildfire' },
+  { value: 'flood',        label: 'Flood' },
+  { value: 'tornado',      label: 'Tornado' },
+  { value: 'winter_storm', label: 'Winter Storm' },
+  { value: 'power_outage', label: 'Power Outage' },
+  { value: 'medical',      label: 'Medical Emergency' },
+  { value: 'financial',    label: 'Financial Crisis' },
+  { value: 'civil_unrest', label: 'Civil Unrest' },
+  { value: 'evacuation',   label: 'Evacuation' },
+  { value: 'other',        label: 'Other' },
+]
+
+function ListInput({ values, onChange, placeholder }: { values: string[]; onChange: (v: string[]) => void; placeholder: string }) {
+  const [draft, setDraft] = useState('')
+  function add() {
+    const t = draft.trim()
+    if (t) { onChange([...values, t]); setDraft('') }
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add() } }}
+          placeholder={placeholder}
+          style={{
+            flex: 1, padding: '8px 10px', borderRadius: '4px',
+            background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+            color: 'var(--color-text)', fontFamily: 'var(--font-body)', fontSize: '13px',
+          }}
+        />
+        <button type="button" onClick={add} style={{
+          padding: '8px 14px', borderRadius: '4px', background: 'transparent',
+          border: '1px solid var(--color-border)', color: 'var(--color-muted)',
+          fontFamily: 'var(--font-mono)', fontSize: '12px', cursor: 'pointer',
+        }}>Add</button>
+      </div>
+      {values.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          {values.map((v, i) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '5px 8px', background: 'var(--color-bg)', borderRadius: '3px', border: '1px solid var(--color-border)' }}>
+              <span style={{ flex: 1, fontSize: '13px', color: 'var(--color-text)' }}>{v}</span>
+              <button type="button" onClick={() => onChange(values.filter((_, j) => j !== i))} style={{ background: 'transparent', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: '0 2px' }}>x</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 const SORTS = [
@@ -214,6 +272,13 @@ export default function Community() {
     location_label: '',
     latitude: initLat,
     longitude: initLon,
+    incident_type: '',
+    state: '',
+    duration: '',
+    what_worked: [] as string[],
+    what_failed: [] as string[],
+    wish_had: [] as string[],
+    key_takeaway: '',
   })
 
   function selectChannel(id: string) {
@@ -476,9 +541,10 @@ export default function Community() {
                       <option value="community">Community Post</option>
                       <option value="field_report">Field Report</option>
                       <option value="self_reported_news">News Report</option>
+                      <option value="aar">After Action Report</option>
                     </select>
                   </div>
-                  {form.post_type !== 'self_reported_news' && (
+                  {form.post_type !== 'self_reported_news' && form.post_type !== 'aar' && (
                     <div>
                       <label style={labelStyle}>Category</label>
                       <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} required style={inputStyle}>
@@ -490,21 +556,64 @@ export default function Community() {
                 </div>
               )}
 
+              {form.post_type === 'aar' && (
+                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '12px' }}>
+                  <div>
+                    <label style={labelStyle}>Incident Type</label>
+                    <select value={form.incident_type} onChange={e => setForm(f => ({ ...f, incident_type: e.target.value }))} required style={inputStyle}>
+                      <option value="">Select...</option>
+                      {AAR_INCIDENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>State (optional)</label>
+                    <input value={form.state} onChange={e => setForm(f => ({ ...f, state: e.target.value }))} placeholder="e.g. Texas" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Duration (optional)</label>
+                    <input value={form.duration} onChange={e => setForm(f => ({ ...f, duration: e.target.value }))} placeholder="e.g. 3 days" style={inputStyle} />
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label style={labelStyle}>Title</label>
                 <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} required placeholder="Clear, descriptive title" style={inputStyle} />
               </div>
 
               <div>
-                <label style={labelStyle}>Body</label>
+                <label style={labelStyle}>{form.post_type === 'aar' ? 'Narrative' : 'Body'}</label>
                 <MentionTextarea
                   value={form.body}
                   onChange={v => setForm(f => ({ ...f, body: v }))}
                   rows={4}
-                  placeholder="Details, context, what you're seeing... Type @ to mention a user or # to cite an event/news item."
+                  placeholder={form.post_type === 'aar'
+                    ? 'What happened, in your own words.'
+                    : "Details, context, what you're seeing... Type @ to mention a user or # to cite an event/news item."}
                   style={{ ...inputStyle, resize: 'vertical' as const, width: '100%' }}
                 />
               </div>
+
+              {form.post_type === 'aar' && (
+                <>
+                  <div>
+                    <label style={labelStyle}>What Worked</label>
+                    <ListInput values={form.what_worked} onChange={v => setForm(f => ({ ...f, what_worked: v }))} placeholder="Add something that worked, press Enter" />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>What Failed</label>
+                    <ListInput values={form.what_failed} onChange={v => setForm(f => ({ ...f, what_failed: v }))} placeholder="Add something that failed, press Enter" />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>What You Wish You Had</label>
+                    <ListInput values={form.wish_had} onChange={v => setForm(f => ({ ...f, wish_had: v }))} placeholder="Add something you wish you'd had, press Enter" />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Key Takeaway (optional)</label>
+                    <input value={form.key_takeaway} onChange={e => setForm(f => ({ ...f, key_takeaway: e.target.value }))} placeholder="The one thing worth remembering" style={inputStyle} />
+                  </div>
+                </>
+              )}
 
               <div>
                 <label style={labelStyle}>Location (optional)</label>

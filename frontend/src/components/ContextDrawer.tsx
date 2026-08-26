@@ -221,7 +221,7 @@ export function ContextDrawer() {
                 )}
                 {item.type === 'aar' && (
                   <Link
-                    to={`/aar/${item.id}`}
+                    to={`/post/${item.id}`}
                     onClick={close}
                     style={{
                       fontFamily: 'var(--font-display)', fontSize: '11px', fontWeight: 600,

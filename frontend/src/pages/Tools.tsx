@@ -1245,7 +1245,7 @@ const TOOL_LINKS = [
     id: 'aar',
     name: 'After Action Reports',
     desc: 'Real emergencies documented by community members. What worked, what failed, what they wish they had.',
-    link: '/aar',
+    link: '/community?channel=aar',
   },
 ]
 

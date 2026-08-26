@@ -22,7 +22,6 @@ import Mod from './pages/Mod'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
 import Inbox from './pages/Inbox'
-import AfterAction, { AARDetail } from './pages/AfterAction'
 import Frequencies from './pages/Frequencies'
 import EventThread from './pages/EventThread'
 import { SocketProvider } from './context/SocketContext'
@@ -64,8 +63,11 @@ function App() {
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/inbox/:username" element={<Inbox />} />
-          <Route path="/aar" element={<AfterAction />} />
-          <Route path="/aar/:id" element={<AARDetail />} />
+          {/* After Action Reports are now a post_type within Community, not a separate page.
+              /aar/:id can't be mapped to a specific post (new table, new ids), so it goes
+              to the channel rather than 404ing on old links. */}
+          <Route path="/aar" element={<Navigate to="/community?channel=aar" replace />} />
+          <Route path="/aar/:id" element={<Navigate to="/community?channel=aar" replace />} />
           <Route path="/frequencies" element={<Frequencies />} />
           <Route path="/event/:slug" element={<EventThread />} />
           <Route path="/500" element={<ServerError />} />

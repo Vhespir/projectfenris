@@ -240,7 +240,9 @@ export async function modRoutes(app, { pool }) {
     )
     if (!userRows[0]) return reply.code(404).send({ error: 'User not found' })
 
-    const [posts, comments, guides, aars] = await Promise.all([
+    const [posts, comments, guides] = await Promise.all([
+      // Includes AAR posts (post_type = 'aar') -- AAR is folded into posts,
+      // not a separate table, so no separate query is needed for it.
       pool.query(
         `SELECT id, post_type, title, is_removed, created_at FROM posts
          WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`, [id]
@@ -253,10 +255,6 @@ export async function modRoutes(app, { pool }) {
         `SELECT id, title, is_removed, created_at FROM guides
          WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`, [id]
       ),
-      pool.query(
-        `SELECT id, title, created_at FROM after_action_reports
-         WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50`, [id]
-      ),
     ])
 
     return {
@@ -264,7 +262,6 @@ export async function modRoutes(app, { pool }) {
       posts: posts.rows,
       comments: comments.rows,
       guides: guides.rows,
-      aars: aars.rows,
     }
   })
 

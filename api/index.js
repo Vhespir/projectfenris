@@ -19,7 +19,6 @@ import { notificationRoutes } from './routes/notifications.js'
 import { searchRoutes } from './routes/search.js'
 import { modRoutes } from './routes/mod.js'
 import { externalRoutes } from './routes/external.js'
-import { aarRoutes } from './routes/aar.js'
 import { frequencyRoutes } from './routes/frequencies.js'
 import { inventoryRoutes } from './routes/inventory.js'
 import { refRoutes } from './routes/refs.js'
@@ -391,7 +390,6 @@ await app.register(notificationRoutes, { pool })
 await app.register(searchRoutes, { pool })
 await app.register(modRoutes, { pool })
 await app.register(externalRoutes)
-await app.register(aarRoutes, { pool })
 await app.register(frequencyRoutes, { pool })
 await app.register(inventoryRoutes, { pool })
 await app.register(refRoutes, { pool })

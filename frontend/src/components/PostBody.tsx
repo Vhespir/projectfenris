@@ -117,7 +117,7 @@ function RefCard({ slug }: { slug: string }) {
   }
 
   if (isAar) {
-    return <Link to={`/aar/${data.id}`} style={{ textDecoration: 'none', display: 'block' }}>{card}</Link>
+    return <Link to={`/post/${data.id}`} style={{ textDecoration: 'none', display: 'block' }}>{card}</Link>
   }
 
   return card
