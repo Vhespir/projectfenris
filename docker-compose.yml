@@ -104,6 +104,13 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: development
+      # Cesium's Ion.defaultAccessToken (CesiumMap.tsx) -- without this, Cesium
+      # ion rejects every terrain/imagery request with InvalidCredentials, which
+      # is what "map page isn't working" actually was. Vite reads VITE_-prefixed
+      # vars from process.env at request time in dev-server mode (which is what
+      # actually runs in prod here), so setting this and redeploying is enough --
+      # no rebuild needed.
+      VITE_CESIUM_ION_TOKEN: ${VITE_CESIUM_ION_TOKEN}
     networks:
       - fenris-network
       - coolify
