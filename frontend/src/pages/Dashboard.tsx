@@ -396,12 +396,12 @@ function LiveFeedContent({ data, config, onSetConfig }: {
                 if (row.kind === 'post' && row.postId) navigate(`/post/${row.postId}`)
                 else if (row.kind === 'news' && row.url) window.open(row.url, '_blank', 'noopener,noreferrer')
               }}
-              style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: (row.kind === 'post' || (row.kind === 'news' && row.url)) ? 'pointer' : 'default' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, cursor: (row.kind === 'post' || (row.kind === 'news' && row.url)) ? 'pointer' : 'default' }}
             >
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: row.color, textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0, maxWidth: '38%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {row.badge}
               </span>
-              <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
+              <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
               {row.timeIso && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{timeAgo(row.timeIso)}</span>}
             </div>
             {(row.centroid || row.slug) && (
@@ -655,47 +655,6 @@ function FieldReportsContent({ data }: { data: DashData }) {
       }}>
         Post a field report
       </Link>
-    </div>
-  )
-}
-
-// ─── Widget: Quick Actions ────────────────────────────────────────────────────
-
-function QuickActionsContent({ user }: { user: { username: string } | null }) {
-  const links = [
-    { label: 'Live Feed', to: '/feed', desc: 'Events and verified news' },
-    { label: 'Full Map', to: '/map', desc: 'Interactive global map' },
-    { label: 'Compendium', to: '/compendium', desc: 'Community guide library' },
-    { label: 'Tools', to: '/tools', desc: 'Calculators and inventory' },
-    { label: 'Community', to: '/community', desc: 'Posts, field reports, discussion' },
-  ]
-
-  return (
-    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '8px' }}>
-        {links.map(link => (
-          <Link key={link.to} to={link.to} style={{
-            textDecoration: 'none', padding: '12px 14px', borderRadius: '6px',
-            border: '1px solid var(--color-border)', background: 'var(--color-bg)',
-          }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-accent)' }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)' }}
-          >
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '3px' }}>{link.label}</div>
-            <div style={{ fontFamily: 'var(--font-body)', fontSize: '11px', color: 'var(--color-subtle)', lineHeight: 1.4 }}>{link.desc}</div>
-          </Link>
-        ))}
-      </div>
-      {!user && (
-        <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--color-border)', paddingTop: '12px' }}>
-          <Link to="/register" style={{ flex: 1, textAlign: 'center', padding: '9px', borderRadius: '6px', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }}>
-            Join
-          </Link>
-          <Link to="/login" style={{ flex: 1, textAlign: 'center', padding: '9px', borderRadius: '6px', border: '1px solid var(--color-border)', color: 'var(--color-muted)', fontFamily: 'var(--font-display)', fontSize: '13px', textDecoration: 'none' }}>
-            Sign In
-          </Link>
-        </div>
-      )}
     </div>
   )
 }
@@ -1425,6 +1384,11 @@ function StormThreatsContent() {
             {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
           </div>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+          {item.summary && (
+            <div style={{ fontSize: '11px', color: 'var(--color-muted)', lineHeight: 1.4, marginTop: '3px' }}>
+              {item.summary.length > 140 ? item.summary.slice(0, 140) + '...' : item.summary}
+            </div>
+          )}
         </a>
       ))}
     </div>
@@ -1539,7 +1503,6 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'crypto',           label: 'Crypto',              description: 'Bitcoin and Ethereum spot prices with 24h change',  category: 'Economic' },
   { id: 'drought',          label: 'Drought Monitor',     description: 'US drought coverage by level from NOAA/USDA/NIDIS',category: 'Economic' },
   { id: 'near_earth',       label: 'Near Earth Objects',  description: 'Upcoming asteroid and comet close approaches from NASA', category: 'Science' },
-  { id: 'quick_actions',    label: 'Quick Actions',       description: 'Navigation links and auth actions',                 category: 'Tools' },
   { id: 'inventory',        label: 'Inventory Status',    description: 'Summary of your prep inventory',                   category: 'Tools',                 link: '/tools',      linkLabel: 'Manage' },
 ]
 
@@ -1550,7 +1513,6 @@ const PANEL_CATEGORIES = ['Situational Awareness', 'News & Intel', 'Community', 
 function renderPanelContent(
   type: string,
   data: DashData,
-  user: { username: string } | null,
   config?: Record<string, unknown>,
   onSetConfig?: (update: Record<string, unknown>) => void,
 ) {
@@ -1560,7 +1522,6 @@ function renderPanelContent(
     case 'event_counts':     return <EventCountsContent data={data} />
     case 'community':        return <CommunityContent data={data} />
     case 'field_reports':    return <FieldReportsContent data={data} />
-    case 'quick_actions':    return <QuickActionsContent user={user} />
     case 'inventory':        return <InventoryContent />
     case 'top_guides':       return <TopGuidesContent />
     case 'radar_widget':     return <RadarWidgetContent />
@@ -1652,14 +1613,14 @@ function ConfirmDialog({ onConfirm, onCancel }: { onConfirm: () => void; onCance
 
 function DashSlot({
   slotKey, slot, def, editMode, span, numCols, activeDragKey,
-  onPickSlot, onClear, onConfigure, onResize, onSetConfig, data, user,
+  onPickSlot, onClear, onConfigure, onResize, onSetConfig, data,
 }: {
   slotKey: string; slot: SlotEntry | null; def: PanelDef | null | undefined
   editMode: boolean; span: number; numCols: number; activeDragKey: string | null
   onPickSlot: () => void; onClear: () => void; onConfigure?: () => void
   onResize: (span: number, minHeight: number) => void
   onSetConfig: (u: Record<string, unknown>) => void
-  data: DashData; user: { username: string } | null
+  data: DashData
 }) {
   const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: slotKey, disabled: !editMode || !slot })
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: slotKey, disabled: !editMode })
@@ -1693,7 +1654,7 @@ function DashSlot({
         onResize={onResize}
         currentMinHeight={typeof slot.config.minHeight === 'number' ? slot.config.minHeight : undefined}
       >
-        {renderPanelContent(slot.type, data, user, slot.config, onSetConfig)}
+        {renderPanelContent(slot.type, data, slot.config, onSetConfig)}
       </Panel>
     </div>
   )
@@ -1722,6 +1683,7 @@ export default function Dashboard() {
 
   const hydratedRef = useRef(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   useEffect(() => {
     async function fetchData() {
@@ -1755,12 +1717,22 @@ export default function Dashboard() {
     if (!user) return
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(() => {
+      setSaveStatus('saving')
       fetch('/api/users/me', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ preferences: { dashboard: { columns, rows, slots } } }),
-      }).catch(() => {})
+      })
+        .then(res => {
+          if (!res.ok) throw new Error(`save failed: ${res.status}`)
+          setSaveStatus('saved')
+          setTimeout(() => setSaveStatus('idle'), 2000)
+        })
+        .catch(err => {
+          console.error('Dashboard layout save failed:', err)
+          setSaveStatus('error')
+        })
     }, 2000)
     return () => { if (saveTimer.current) clearTimeout(saveTimer.current) }
   }, [columns, rows, slots, user])
@@ -1867,7 +1839,6 @@ export default function Dashboard() {
         onResize={(s, h) => setSlotConfig(key, { span: s, minHeight: h })}
         onSetConfig={u => setSlotConfig(key, u)}
         data={data}
-        user={user}
       />
     )
   }
@@ -1927,6 +1898,14 @@ export default function Dashboard() {
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: '5px', padding: '4px 10px' }}>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-accent)', letterSpacing: '0.04em' }}>All clear</span>
               </div>
+            )}
+            {editMode && user && saveStatus !== 'idle' && (
+              <span style={{
+                fontFamily: 'var(--font-mono)', fontSize: '10px', letterSpacing: '0.06em',
+                color: saveStatus === 'error' ? '#EF4444' : saveStatus === 'saved' ? 'var(--color-accent)' : 'var(--color-subtle)',
+              }}>
+                {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : 'Save failed, try again'}
+              </span>
             )}
             <button
               onClick={() => setEditMode(v => !v)}
