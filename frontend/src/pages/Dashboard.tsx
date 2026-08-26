@@ -502,8 +502,19 @@ function MapContent({ data }: { data: DashData }) {
 
 // ─── Widget: Event Counts ─────────────────────────────────────────────────────
 
-function EventCountsContent({ data }: { data: DashData }) {
-  const events = data.events
+function EventCountsContent({ data, config, onSetConfig }: {
+  data: DashData
+  config?: Record<string, unknown>
+  onSetConfig?: (u: Record<string, unknown>) => void
+}) {
+  // MeteoAlarm alone can carry thousands of Minor-severity advisories across
+  // 45 countries -- real data, but it swamps this summary's whole point,
+  // which is telling you what actually matters. Minor is hidden by default;
+  // toggle it back on via Config to see everything.
+  const hideMinor = config?.hideMinor !== false
+  const configOpen = config?._open === true
+  const events = hideMinor ? data.events.filter(e => e.severity !== 'Minor') : data.events
+  const hiddenCount = data.events.length - events.length
 
   const bySev: Record<string, number> = {}
   const bySrc: Record<string, number> = {}
@@ -521,55 +532,75 @@ function EventCountsContent({ data }: { data: DashData }) {
 
   if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
 
+  const configPanel = configOpen && onSetConfig ? (
+    <div style={{ padding: '12px 16px', borderTop: '1px solid var(--color-border)', background: 'rgba(0,0,0,0.15)' }}>
+      <button onClick={() => onSetConfig({ hideMinor: !hideMinor })}
+        style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)', cursor: 'pointer',
+          border: `1px solid ${hideMinor ? 'var(--color-accent)' : 'var(--color-border)'}`,
+          background: hideMinor ? 'rgba(34,197,94,0.1)' : 'transparent',
+          color: hideMinor ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+        {hideMinor ? '✓ ' : ''}Hide Minor-severity events
+      </button>
+    </div>
+  ) : null
+
   return (
-    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Total + severity breakdown */}
-      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '36px', fontWeight: 700, color: 'var(--color-text)', lineHeight: 1 }}>{events.length}</div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '4px' }}>Active Events</div>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-          {sevOrder.filter(s => bySev[s]).map(s => (
-            <div key={s} style={{ textAlign: 'center' }}>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', fontWeight: 700, color: SEV_COLOR[s] ?? 'var(--color-muted)' }}>{bySev[s]}</div>
-              <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s}</div>
+    <div>
+      <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {/* Total + severity breakdown */}
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '36px', fontWeight: 700, color: 'var(--color-text)', lineHeight: 1 }}>{events.length}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em', marginTop: '4px' }}>Active Events</div>
+          </div>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            {sevOrder.filter(s => bySev[s]).map(s => (
+              <div key={s} style={{ textAlign: 'center' }}>
+                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', fontWeight: 700, color: SEV_COLOR[s] ?? 'var(--color-muted)' }}>{bySev[s]}</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: '9px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{s}</div>
+              </div>
+            ))}
+          </div>
+          {hiddenCount > 0 && (
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>
+              +{hiddenCount} minor hidden
             </div>
-          ))}
+          )}
         </div>
-      </div>
 
-      {/* By source */}
-      <div>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>By Source</div>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {Object.entries(bySrc).sort((a, b) => b[1] - a[1]).map(([src, count]) => (
-            <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 8px', borderRadius: '3px', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-accent)' }}>{src.toUpperCase()}</span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)' }}>{count}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Top event types */}
-      {topTypes.length > 0 && (
+        {/* By source */}
         <div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Top Event Types</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {topTypes.map(([type, count]) => (
-              <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div style={{ flex: 1, height: '2px', background: 'var(--color-border)', borderRadius: '1px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: `${Math.round(count / events.length * 100)}%`, background: 'var(--color-accent)', borderRadius: '1px' }} />
-                </div>
-                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', minWidth: '80px', textAlign: 'right' }}>
-                  {type.replace(/_/g, ' ')} ({count})
-                </span>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>By Source</div>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {Object.entries(bySrc).sort((a, b) => b[1] - a[1]).map(([src, count]) => (
+              <div key={src} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '3px 8px', borderRadius: '3px', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-accent)' }}>{src.toUpperCase()}</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)' }}>{count}</span>
               </div>
             ))}
           </div>
         </div>
-      )}
+
+        {/* Top event types */}
+        {topTypes.length > 0 && (
+          <div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '8px' }}>Top Event Types</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {topTypes.map(([type, count]) => (
+                <div key={type} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ flex: 1, height: '2px', background: 'var(--color-border)', borderRadius: '1px', overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${Math.round(count / events.length * 100)}%`, background: 'var(--color-accent)', borderRadius: '1px' }} />
+                  </div>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', minWidth: '80px', textAlign: 'right' }}>
+                    {type.replace(/_/g, ' ')} ({count})
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+      {configPanel}
     </div>
   )
 }
@@ -1486,7 +1517,7 @@ interface PanelDef {
 const PANEL_DEFS: PanelDef[] = [
   { id: 'live_feed',        label: 'Live Feed',           description: 'Events, news, and community reports in one filterable stream, with map and discuss links', category: 'Situational Awareness', link: '/feed', linkLabel: 'View feed', configurable: true },
   { id: 'map',              label: 'Live Map',            description: 'Interactive map with live event markers',             category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
-  { id: 'event_counts',     label: 'Event Summary',       description: 'Active event counts by severity, source, and type',  category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed' },
+  { id: 'event_counts',     label: 'Event Summary',       description: 'Active event counts by severity, source, and type',  category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed', configurable: true },
   { id: 'radar_widget',     label: 'Radar',               description: 'Live weather radar overlay',                         category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
   { id: 'storm_threats',    label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories',             category: 'Situational Awareness' },
   { id: 'wildfires',        label: 'Active Wildfires',     description: 'Uncontained wildfire incidents by size, from NIFC',  category: 'Situational Awareness' },
@@ -1519,7 +1550,7 @@ function renderPanelContent(
   switch (type) {
     case 'live_feed':        return <LiveFeedContent data={data} config={config} onSetConfig={onSetConfig} />
     case 'map':              return <MapContent data={data} />
-    case 'event_counts':     return <EventCountsContent data={data} />
+    case 'event_counts':     return <EventCountsContent data={data} config={config} onSetConfig={onSetConfig} />
     case 'community':        return <CommunityContent data={data} />
     case 'field_reports':    return <FieldReportsContent data={data} />
     case 'inventory':        return <InventoryContent />
