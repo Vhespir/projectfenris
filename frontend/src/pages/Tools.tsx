@@ -689,6 +689,11 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
   const cats = Array.from(new Set(items.map(i => i.category))).sort()
   const displayed = filterCat ? items.filter(i => i.category === filterCat) : items
   const sortedItems = [...displayed].sort((a, b) => {
+    // Grouped by pillar first (Water, Food, Medical, Power & Lighting...) so a
+    // cache's medical or power items show up as their own section without
+    // needing a separate IFAK or Power Cache kit to hold them.
+    const pd = PILLAR_ORDER.indexOf(pillarFor(a.category)) - PILLAR_ORDER.indexOf(pillarFor(b.category))
+    if (pd !== 0) return pd
     const cd = a.category.localeCompare(b.category)
     if (cd !== 0) return cd
     return a.name.localeCompare(b.name)
@@ -781,7 +786,7 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
             <DocumentChecklist />
           </CollapsiblePanel>
         )}
-        {activeKit.type === 'power_cache' && (
+        {(activeKit.type === 'home_cache' || activeKit.type === 'power_cache') && (
           <CollapsiblePanel label="Generator and fuel calculator">
             <GeneratorCalculator />
           </CollapsiblePanel>
@@ -914,14 +919,21 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
         {/* Item list */}
         {sortedItems.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)', borderRadius: '6px', overflow: 'hidden', marginBottom: '20px' }}>
-            {sortedItems.map(item => {
+            {sortedItems.map((item, idx) => {
               const status = invStatus(item.qty, item.par)
               const color = SC[status]
               const expired = item.expiry && item.expiry < today
               const expiring = item.expiry && !expired && item.expiry <= soonDate
               const isExpanded = expandedId === item.id
+              const pillar = pillarFor(item.category)
+              const showPillarHeader = idx === 0 || pillarFor(sortedItems[idx - 1].category) !== pillar
               return (
                 <div key={item.id}>
+                  {showPillarHeader && (
+                    <div style={{ background: 'var(--color-bg)', padding: '7px 14px', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      {pillar}
+                    </div>
+                  )}
                   <div
                     onClick={() => openExpand(item)}
                     style={{ background: 'var(--color-surface)', padding: '9px 14px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: isMobile ? 'wrap' : 'nowrap', cursor: 'pointer' }}
@@ -1048,10 +1060,10 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
           <div style={{ fontFamily: 'var(--font-body)', fontSize: '13px', color: 'var(--color-muted)', lineHeight: 1.6, marginBottom: '20px' }}>
             {typeFilter
               ? <>Create one and it tracks its own items, readiness, weight, and cost.</>
-              : <>Create named kits for your EDC, Bug Out Bag, IFAK, Home Cache, and more.<br />Each kit tracks its own items, readiness, weight, and cost.</>}
+              : <>Create named kits for your EDC, Bug Out Bag, Home Cache, and more.<br />Each kit tracks its own items, readiness, weight, and cost.</>}
           </div>
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
-            {(typeFilter ? [typeFilter] : (['bob', 'ifak', 'edc', 'home_cache', 'vehicle'] as KitType[])).map(type => (
+            {(typeFilter ? [typeFilter] : (['bob', 'edc', 'home_cache', 'vehicle', 'ghb'] as KitType[])).map(type => (
               <button key={type} onClick={() => { setNewKitForm({ name: KIT_META[type].label, type, location_label: '' }); setShowNewKit(true) }}
                 style={{ padding: '6px 14px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--font-display)', cursor: 'pointer', border: `1px solid ${KIT_META[type].color}50`, background: `${KIT_META[type].color}12`, color: KIT_META[type].color }}>
                 + {KIT_META[type].label}
@@ -1512,7 +1524,13 @@ function DocumentChecklist() {
 
 type HubTab = 'overview' | 'all' | KitType
 
-const KIT_TYPE_ORDER: KitType[] = ['edc', 'bob', 'ghb', 'inch', 'vehicle', 'home_cache', 'ifak', 'trauma', 'med_kit', 'comms', 'power_cache', 'custom']
+// IFAK, Trauma, Med Kit, Comms, and Power Cache are not tabs of their own.
+// A cache's medical or power items already get their own section inside
+// that cache (grouped by pillar), so a dedicated kit type for them would
+// just be the same items with an extra layer of navigation on top. They're
+// still valid kit types under "All Kits" for anyone who genuinely wants a
+// standalone one (a belt IFAK separate from the BOB it rides in, say).
+const KIT_TYPE_ORDER: KitType[] = ['edc', 'bob', 'ghb', 'inch', 'vehicle', 'home_cache', 'custom']
 
 function InventoryHub() {
   const [tab, setTab] = useState<HubTab>('overview')
@@ -1560,7 +1578,7 @@ const TOOLS = [
   {
     id: 'inventory',
     name: 'Inventory Manager',
-    desc: 'One tab per cache: EDC, BOB, GHB, INCH, Vehicle, Home Cache, IFAK, Trauma, Med Kit, Comms, Power Cache. Each one already knows your water and food targets, and Home Cache and Power Cache carry the documents checklist and generator calculator built in.',
+    desc: 'One tab per cache: EDC, BOB, GHB, INCH, Vehicle, Home Cache. Each one already knows your water and food targets, groups medical and power items into their own sections, and Home Cache adds the documents checklist and generator calculator.',
     component: <InventoryHub />,
   },
 ]
