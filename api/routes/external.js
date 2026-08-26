@@ -397,4 +397,97 @@ export async function externalRoutes(app) {
       reply.code(503).send({ error: 'stocks unavailable', detail: err.message })
     }
   })
+
+  // ── USGS river gauges (streamflow + gauge height) ─────────────────────────────
+  app.get('/external/streamflow', async (req, reply) => {
+    const state = (req.query?.state ?? '').trim().toLowerCase()
+    if (!/^[a-z]{2}$/.test(state)) {
+      return reply.code(400).send({ error: 'state query param required (2-letter code)' })
+    }
+    try {
+      const data = await withCache(`streamflow:${state}`, 15 * 60_000, async () => {
+        const url = `https://waterservices.usgs.gov/nwis/iv/?format=json&stateCd=${state}` +
+          `&parameterCd=00060,00065&siteStatus=active`
+        const res = await fetch(url, { headers: H, signal: AbortSignal.timeout(20_000) })
+        if (!res.ok) throw new Error(`USGS Water Services ${res.status}`)
+        const json = await res.json()
+        const series = json?.value?.timeSeries ?? []
+
+        // Each site shows up as two separate series (discharge, gauge height) --
+        // fold them back together by site code.
+        const bySite = new Map()
+        for (const ts of series) {
+          const siteCode = ts.sourceInfo?.siteCode?.[0]?.value
+          const paramCode = ts.variable?.variableCode?.[0]?.value
+          const latest = ts.values?.[0]?.value?.[0]
+          if (!siteCode || !latest || latest.value == null) continue
+          const val = parseFloat(latest.value)
+          if (isNaN(val)) continue
+
+          if (!bySite.has(siteCode)) {
+            const geo = ts.sourceInfo?.geoLocation?.geogLocation
+            bySite.set(siteCode, {
+              site_code: siteCode,
+              site_name: ts.sourceInfo?.siteName ?? siteCode,
+              latitude: geo?.latitude ?? null,
+              longitude: geo?.longitude ?? null,
+              discharge_cfs: null,
+              gauge_height_ft: null,
+              updated_at: null,
+            })
+          }
+          const site = bySite.get(siteCode)
+          if (paramCode === '00060') site.discharge_cfs = val
+          else if (paramCode === '00065') site.gauge_height_ft = val
+          site.updated_at = latest.dateTime ?? site.updated_at
+        }
+
+        // Sort by discharge descending -- on any given state this naturally
+        // surfaces the major rivers over small creeks, since there's no
+        // flood-stage threshold available without a second, per-site API call.
+        return Array.from(bySite.values())
+          .filter(s => s.discharge_cfs != null || s.gauge_height_ft != null)
+          .sort((a, b) => (b.discharge_cfs ?? 0) - (a.discharge_cfs ?? 0))
+          .slice(0, 8)
+      })
+      return data
+    } catch (err) {
+      reply.code(503).send({ error: 'streamflow unavailable', detail: err.message })
+    }
+  })
+
+  // ── NIFC active wildfire perimeters (WFIGS) ────────────────────────────────────
+  app.get('/external/wildfires', async (_req, reply) => {
+    try {
+      const data = await withCache('wildfires', 30 * 60_000, async () => {
+        const base = 'https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/' +
+          'WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query'
+        const params = new URLSearchParams({
+          where: 'attr_PercentContained < 100',
+          outFields: 'poly_IncidentName,poly_GISAcres,attr_PercentContained,attr_POOState,attr_FireDiscoveryDateTime',
+          orderByFields: 'poly_GISAcres DESC',
+          resultRecordCount: '15',
+          returnGeometry: 'false',
+          f: 'json',
+        })
+        const res = await fetch(`${base}?${params}`, { headers: H, signal: AbortSignal.timeout(20_000) })
+        if (!res.ok) throw new Error(`NIFC WFIGS ${res.status}`)
+        const json = await res.json()
+        if (json.error) throw new Error(json.error.message ?? 'NIFC WFIGS error')
+        return (json.features ?? []).map(f => {
+          const a = f.attributes
+          return {
+            name: a.poly_IncidentName ?? 'Unnamed incident',
+            acres: a.poly_GISAcres != null ? Math.round(a.poly_GISAcres) : null,
+            contained_pct: a.attr_PercentContained ?? null,
+            state: (a.attr_POOState ?? '').replace(/^US-/, ''),
+            discovered_at: a.attr_FireDiscoveryDateTime ? new Date(a.attr_FireDiscoveryDateTime).toISOString() : null,
+          }
+        })
+      })
+      return data
+    } catch (err) {
+      reply.code(503).send({ error: 'wildfires unavailable', detail: err.message })
+    }
+  })
 }

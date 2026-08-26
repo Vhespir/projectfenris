@@ -1230,7 +1230,102 @@ function DroughtContent() {
   )
 }
 
+// ─── Widget: River Levels (USGS streamflow) ───────────────────────────────────
 
+interface StreamflowSite {
+  site_code: string; site_name: string
+  discharge_cfs: number | null; gauge_height_ft: number | null
+}
+
+function StreamflowContent() {
+  const { user } = useAuth()
+  const state = user?.region_state
+  const [sites, setSites] = useState<StreamflowSite[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [failed, setFailed] = useState(false)
+
+  useEffect(() => {
+    if (!state) { setLoading(false); return }
+    setLoading(true)
+    setFailed(false)
+    fetch(`/api/external/streamflow?state=${encodeURIComponent(state)}`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(d => { setSites(Array.isArray(d) ? d : []); setLoading(false) })
+      .catch(() => { setFailed(true); setLoading(false) })
+  }, [state])
+
+  if (!state) return (
+    <div style={{ padding: '24px', textAlign: 'center' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', marginBottom: '10px' }}>
+        Set your state in Settings to see river levels near you.
+      </div>
+      <Link to="/settings" style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-accent)', textDecoration: 'none' }}>
+        Open Settings
+      </Link>
+    </div>
+  )
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (failed || !sites || sites.length === 0) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)', textAlign: 'center' }}>Data unavailable.</div>
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {sites.map(s => (
+        <div key={s.site_code} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', background: 'var(--color-surface)' }}>
+          <span style={{ fontSize: '12px', color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.site_name}</span>
+          {s.discharge_cfs != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-accent)', flexShrink: 0 }}>{Math.round(s.discharge_cfs).toLocaleString()} cfs</span>}
+          {s.gauge_height_ft != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)', flexShrink: 0 }}>{s.gauge_height_ft.toFixed(1)} ft</span>}
+        </div>
+      ))}
+      <div style={{ padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>USGS Water Services · live gauge readings, highest flow first</div>
+    </div>
+  )
+}
+
+// ─── Widget: Active Wildfires (NIFC WFIGS perimeters) ─────────────────────────
+
+interface WildfireItem {
+  name: string; acres: number | null; contained_pct: number | null
+  state: string; discovered_at: string | null
+}
+
+function WildfiresContent() {
+  const [items, setItems] = useState<WildfireItem[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/external/wildfires')
+      .then(r => r.ok ? r.json() : [])
+      .then(d => { setItems(Array.isArray(d) ? d : []); setLoading(false) })
+      .catch(() => setLoading(false))
+  }, [])
+
+  if (loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
+  if (!items.length) return (
+    <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#22C55E', display: 'inline-block', flexShrink: 0 }} />
+      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: '#22C55E', letterSpacing: '0.06em' }}>NO LARGE UNCONTAINED WILDFIRES</span>
+    </div>
+  )
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
+      {items.map(f => {
+        const color = f.contained_pct == null ? 'var(--color-muted)' : f.contained_pct < 25 ? '#EF4444' : f.contained_pct < 75 ? '#F59E0B' : '#22C55E'
+        return (
+          <div key={`${f.name}-${f.state}`} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 14px', background: 'var(--color-surface)', borderLeft: `3px solid ${color}` }}>
+            <span style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {f.name}{f.state ? ` (${f.state})` : ''}
+            </span>
+            {f.acres != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-muted)', flexShrink: 0 }}>{f.acres.toLocaleString()} ac</span>}
+            {f.contained_pct != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color, flexShrink: 0 }}>{f.contained_pct}% contained</span>}
+          </div>
+        )
+      })}
+      <div style={{ padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--color-subtle)' }}>NIFC WFIGS · uncontained incidents, largest first</div>
+    </div>
+  )
+}
 
 // ─── Widget: Near Earth Objects ───────────────────────────────────────────────
 
@@ -1430,6 +1525,8 @@ const PANEL_DEFS: PanelDef[] = [
   { id: 'event_counts',     label: 'Event Summary',       description: 'Active event counts by severity, source, and type',  category: 'Situational Awareness', link: '/feed',       linkLabel: 'View feed' },
   { id: 'radar_widget',     label: 'Radar',               description: 'Live weather radar overlay',                         category: 'Situational Awareness', link: '/map',        linkLabel: 'Full map' },
   { id: 'storm_threats',    label: 'Storm Threats',       description: 'Active hurricane and tsunami advisories',             category: 'Situational Awareness' },
+  { id: 'wildfires',        label: 'Active Wildfires',     description: 'Uncontained wildfire incidents by size, from NIFC',  category: 'Situational Awareness' },
+  { id: 'streamflow',       label: 'River Levels',         description: 'Live USGS gauge readings for your state',            category: 'Situational Awareness' },
   { id: 'space_weather',    label: 'Space Weather',       description: 'NOAA SWPC geomagnetic storm and solar flare alerts', category: 'News & Intel' },
   { id: 'cisa_alerts',      label: 'CISA Alerts',         description: 'Cybersecurity advisories and alerts from CISA',     category: 'News & Intel' },
   { id: 'travel_advisories',label: 'Travel Advisories',   description: 'US State Department travel advisories by country',  category: 'News & Intel' },
@@ -1473,6 +1570,8 @@ function renderPanelContent(
     case 'recalls':          return <RecallsContent />
     case 'crypto':           return <CryptoContent />
     case 'drought':          return <DroughtContent />
+    case 'wildfires':        return <WildfiresContent />
+    case 'streamflow':       return <StreamflowContent />
     case 'near_earth':       return <NearEarthContent />
     case 'storm_threats':    return <StormThreatsContent />
     case 'cisa_alerts':      return <CisaAlertsContent />
