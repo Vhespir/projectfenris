@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
@@ -45,13 +45,21 @@ function computeCalorieTargets(adults: number, children: number, elderly: number
 
 // ─── Water Storage Calculator ──────────────────────────────────────────────────
 
-function WaterCalculator() {
+function WaterCalculator({ household, onHouseholdChange }: { household?: Household; onHouseholdChange?: (h: Household) => void } = {}) {
   const isMobile = useIsMobile()
-  const [people, setPeople] = useState(2)
-  const [pets, setPets] = useState(0)
-  const [days, setDays] = useState(14)
+  const controlled = !!household
+  const [localPeople, setLocalPeople] = useState(2)
+  const [localPets, setLocalPets] = useState(0)
+  const [localDays, setLocalDays] = useState(14)
   const [heat, setHeat] = useState(false)
   const [active, setActive] = useState(false)
+
+  const people = household?.people ?? localPeople
+  const pets = household?.pets ?? localPets
+  const days = household?.days ?? localDays
+  function setPeople(v: number) { onHouseholdChange ? onHouseholdChange({ people: v, pets, days }) : setLocalPeople(v) }
+  function setPets(v: number)   { onHouseholdChange ? onHouseholdChange({ people, pets: v, days }) : setLocalPets(v) }
+  function setDays(v: number)   { onHouseholdChange ? onHouseholdChange({ people, pets, days: v }) : setLocalDays(v) }
 
   const { totalGallons, drinkingGallons } = computeWaterTargets(people, pets, days, heat, active)
   const containers55 = Math.ceil(totalGallons / 55)
@@ -60,11 +68,19 @@ function WaterCalculator() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '32px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-          <div><label style={labelStyle}>People</label><input type="number" min={1} max={20} value={people} onChange={e => setPeople(+e.target.value || 1)} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Pets</label><input type="number" min={0} max={10} value={pets} onChange={e => setPets(+e.target.value || 0)} style={inputStyle} /></div>
-        </div>
-        <div><label style={labelStyle}>Duration (days)</label><input type="number" min={1} max={365} value={days} onChange={e => setDays(+e.target.value || 1)} style={inputStyle} /></div>
+        {controlled ? (
+          <div style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--color-border)', fontSize: '12px', color: 'var(--color-subtle)' }}>
+            Using this cache's household: {people} people{pets > 0 ? `, ${pets} pets` : ''}, {days}-day target. Edit it in the household field above.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div><label style={labelStyle}>People</label><input type="number" min={1} max={20} value={people} onChange={e => setPeople(+e.target.value || 1)} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Pets</label><input type="number" min={0} max={10} value={pets} onChange={e => setPets(+e.target.value || 0)} style={inputStyle} /></div>
+            </div>
+            <div><label style={labelStyle}>Duration (days)</label><input type="number" min={1} max={365} value={days} onChange={e => setDays(+e.target.value || 1)} style={inputStyle} /></div>
+          </>
+        )}
         <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
           {[{ label: 'Hot climate / summer', value: heat, set: setHeat }, { label: 'High activity / labor', value: active, set: setActive }].map(({ label, value, set }) => (
             <label key={label} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--color-muted)' }}>
@@ -92,14 +108,22 @@ function WaterCalculator() {
 
 // ─── Caloric Needs Calculator ──────────────────────────────────────────────────
 
-function CaloricCalculator() {
+function CaloricCalculator({ household }: { household?: Household } = {}) {
   const isMobile = useIsMobile()
-  const [adults, setAdults] = useState(2)
+  const controlled = !!household
+  const [localAdults, setLocalAdults] = useState(2)
   const [children, setChildren] = useState(0)
   const [elderly, setElderly] = useState(0)
   const [activity, setActivity] = useState<ActivityLevel>('moderate')
 
-  const { adultCals, childCals, elderlyCals, dailyTotal } = computeCalorieTargets(adults, children, elderly, activity)
+  // Controlled by a cache's household: that only tracks a total person count,
+  // not an age breakdown, so it's counted as adults at whatever activity
+  // level is picked here.
+  const adults = household?.people ?? localAdults
+  const effectiveChildren = controlled ? 0 : children
+  const effectiveElderly = controlled ? 0 : elderly
+
+  const { adultCals, childCals, elderlyCals, dailyTotal } = computeCalorieTargets(adults, effectiveChildren, effectiveElderly, activity)
   const cal72h = dailyTotal * 3
   const cal2wk = dailyTotal * 14
   const cal30d = dailyTotal * 30
@@ -110,11 +134,17 @@ function CaloricCalculator() {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '32px' }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '12px' }}>
-          <div><label style={labelStyle}>Adults</label><input type="number" min={0} max={20} value={adults} onChange={e => setAdults(+e.target.value || 0)} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Children</label><input type="number" min={0} max={20} value={children} onChange={e => setChildren(+e.target.value || 0)} style={inputStyle} /></div>
-          <div><label style={labelStyle}>Elderly (65+)</label><input type="number" min={0} max={20} value={elderly} onChange={e => setElderly(+e.target.value || 0)} style={inputStyle} /></div>
-        </div>
+        {controlled ? (
+          <div style={{ padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--color-border)', fontSize: '12px', color: 'var(--color-subtle)' }}>
+            Using this cache's household: {adults} people, counted as adults. Edit the count in the household field above.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr 1fr', gap: '12px' }}>
+            <div><label style={labelStyle}>Adults</label><input type="number" min={0} max={20} value={localAdults} onChange={e => setLocalAdults(+e.target.value || 0)} style={inputStyle} /></div>
+            <div><label style={labelStyle}>Children</label><input type="number" min={0} max={20} value={children} onChange={e => setChildren(+e.target.value || 0)} style={inputStyle} /></div>
+            <div><label style={labelStyle}>Elderly (65+)</label><input type="number" min={0} max={20} value={elderly} onChange={e => setElderly(+e.target.value || 0)} style={inputStyle} /></div>
+          </div>
+        )}
         <div>
           <label style={labelStyle}>Activity level during emergency</label>
           <select value={activity} onChange={e => setActivity(e.target.value as typeof activity)} style={inputStyle}>
@@ -170,6 +200,11 @@ interface Kit {
   id: string; name: string; type: KitType; purpose?: string
   location_label?: string; weight_limit_g?: number; budget_cents?: number; notes?: string
   item_count?: number; total_weight_g?: number; total_cost_cents?: number
+  // Who this specific cache is sized for. Deliberately per-kit, not a single
+  // site-wide setting: a GHB is usually sized for one person getting home,
+  // a Home Cache for the whole household, and those numbers shouldn't fight
+  // each other.
+  household_people: number; household_pets: number; household_days: number
 }
 interface KitItem {
   id: string; kit_id: string; template_id?: string | null; name: string; category: string
@@ -354,8 +389,14 @@ function fmtWeight(g: number): string {
   return g >= 1000 ? `${(g / 1000).toFixed(1)} kg` : `${g} g`
 }
 
-function loadHousehold(): Household {
+// Not the household for any particular kit (that's per-kit now, on the kit
+// itself), just what to seed a brand-new kit's household with, so you're
+// not re-typing "2 people, 14 days" every time you create one.
+function loadDefaultHousehold(): Household {
   try { const v = localStorage.getItem('fenris_household'); return v ? JSON.parse(v) : { people: 2, pets: 0, days: 14 } } catch { return { people: 2, pets: 0, days: 14 } }
+}
+function saveDefaultHousehold(h: Household): void {
+  try { localStorage.setItem('fenris_household', JSON.stringify(h)) } catch {}
 }
 function loadLocalKits(): Kit[] {
   try { const v = localStorage.getItem('fenris_kits'); return v ? JSON.parse(v) : [] } catch { return [] }
@@ -444,7 +485,6 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
   const [expandBuf, setExpandBuf] = useState<Partial<KitItem & { cost_str: string; weight_str: string }>>({})
   const [showCustom, setShowCustom] = useState(false)
   const [customForm, setCustomForm] = useState({ name: '', category: '', qty: '0', par: '0', unit: '', note: '', storage_location: '', expiry: '' })
-  const [household, setHousehold] = useState<Household>(loadHousehold)
   const [showHousehold, setShowHousehold] = useState(false)
   const [confirmDeleteKit, setConfirmDeleteKit] = useState<string | null>(null)
   const [suggestDone, setSuggestDone] = useState(false)
@@ -467,7 +507,11 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
     }
   }, [typeFilter, kits]) // eslint-disable-line react-hooks/exhaustive-deps
   const soonDate = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
-  const h: Household = { people: household.people || 2, pets: household.pets || 0, days: household.days || 14 }
+  // This cache's own household, not a site-wide one: a GHB and a Home
+  // Cache can genuinely be sized for different numbers of people.
+  const h: Household = activeKit
+    ? { people: activeKit.household_people || 2, pets: activeKit.household_pets || 0, days: activeKit.household_days || 14 }
+    : { people: 2, pets: 0, days: 14 }
 
   // Load kits on mount / user change
   useEffect(() => {
@@ -514,14 +558,14 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
     loadItems()
   }, [activeKitId, user])
 
-  useEffect(() => {
-    try { localStorage.setItem('fenris_household', JSON.stringify(household)) } catch {}
-  }, [household])
-
   async function createKit() {
     if (!newKitForm.name.trim()) return
     setCreatingKit(true)
-    const payload = { name: newKitForm.name.trim(), type: newKitForm.type, location_label: newKitForm.location_label.trim() || undefined }
+    const seedHousehold = loadDefaultHousehold()
+    const payload = {
+      name: newKitForm.name.trim(), type: newKitForm.type, location_label: newKitForm.location_label.trim() || undefined,
+      household_people: seedHousehold.people, household_pets: seedHousehold.pets, household_days: seedHousehold.days,
+    }
     if (user) {
       try {
         const res = await fetch('/api/inventory/kits', {
@@ -563,6 +607,44 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
     if (user && !kitId.startsWith('local_')) {
       try { await fetch(`/api/inventory/kits/${kitId}`, { method: 'DELETE', credentials: 'include' }) } catch {}
     }
+  }
+
+  async function updateKit(kitId: string, changes: Partial<Kit>) {
+    setKits(prev => { const next = prev.map(k => k.id === kitId ? { ...k, ...changes } : k); saveLocalKits(next); return next })
+    if (user && !kitId.startsWith('local_')) {
+      try {
+        await fetch(`/api/inventory/kits/${kitId}`, {
+          method: 'PATCH', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(changes),
+        })
+      } catch {}
+    }
+  }
+
+  // Household edits fire on every keystroke for a responsive target display,
+  // but only get persisted (and remembered as the default for the next new
+  // kit) after a short pause, same debounce pattern as the dashboard layout.
+  // Pending changes accumulate per kit rather than just keeping the latest
+  // call's delta, so editing people then pets within the same pause doesn't
+  // drop the first field from what actually gets saved.
+  const householdSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const pendingHouseholdChanges = useRef<Record<string, Partial<Pick<Kit, 'household_people' | 'household_pets' | 'household_days'>>>>({})
+  function updateKitHousehold(kitId: string, changes: Partial<Pick<Kit, 'household_people' | 'household_pets' | 'household_days'>>) {
+    setKits(prev => prev.map(k => k.id === kitId ? { ...k, ...changes } : k))
+    pendingHouseholdChanges.current[kitId] = { ...pendingHouseholdChanges.current[kitId], ...changes }
+    if (householdSaveTimers.current[kitId]) clearTimeout(householdSaveTimers.current[kitId])
+    householdSaveTimers.current[kitId] = setTimeout(() => {
+      const toSave = pendingHouseholdChanges.current[kitId]
+      delete pendingHouseholdChanges.current[kitId]
+      if (!toSave) return
+      updateKit(kitId, toSave)
+      setKits(prev => {
+        const kit = prev.find(k => k.id === kitId)
+        if (kit) saveDefaultHousehold({ people: kit.household_people, pets: kit.household_pets, days: kit.household_days })
+        return prev
+      })
+    }, 500)
   }
 
   async function addItem(item: Omit<KitItem, 'id' | 'kit_id'>) {
@@ -775,10 +857,10 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
           <>
             <KitTargetsPanel h={h} />
             <CollapsiblePanel label="Full water storage calculator">
-              <WaterCalculator />
+              <WaterCalculator household={h} onHouseholdChange={next => updateKitHousehold(activeKit.id, { household_people: next.people, household_pets: next.pets, household_days: next.days })} />
             </CollapsiblePanel>
             <CollapsiblePanel label="Full caloric needs calculator">
-              <CaloricCalculator />
+              <CaloricCalculator household={h} />
             </CollapsiblePanel>
           </>
         )}
@@ -813,14 +895,19 @@ function InventoryManager({ typeFilter }: { typeFilter?: KitType | null } = {}) 
           </button>
         </div>
 
-        {/* Household editor (collapsible) */}
+        {/* Household editor (collapsible), this cache's own, not shared with any other */}
         {showHousehold && (
-          <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '16px', marginBottom: '20px', display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px' }}>
-            <div><label style={labelStyle}>People</label><input type="number" min={1} max={20} value={household.people} onChange={e => setHousehold(p => ({ ...p, people: +e.target.value || 1 }))} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Pets</label><input type="number" min={0} max={20} value={household.pets} onChange={e => setHousehold(p => ({ ...p, pets: +e.target.value || 0 }))} style={inputStyle} /></div>
-            <div><label style={labelStyle}>Target days</label><input type="number" min={1} max={365} value={household.days} onChange={e => setHousehold(p => ({ ...p, days: +e.target.value || 14 }))} style={inputStyle} /></div>
-            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-              <button onClick={() => setShowHousehold(false)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: 'none', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Done</button>
+          <div style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '8px', padding: '16px', marginBottom: '20px' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '12px' }}>
+              Who {activeKit.name} is sized for
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr 1fr' : 'repeat(4, 1fr)', gap: '12px' }}>
+              <div><label style={labelStyle}>People</label><input type="number" min={1} max={20} value={h.people} onChange={e => updateKitHousehold(activeKit.id, { household_people: +e.target.value || 1 })} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Pets</label><input type="number" min={0} max={20} value={h.pets} onChange={e => updateKitHousehold(activeKit.id, { household_pets: +e.target.value || 0 })} style={inputStyle} /></div>
+              <div><label style={labelStyle}>Target days</label><input type="number" min={1} max={365} value={h.days} onChange={e => updateKitHousehold(activeKit.id, { household_days: +e.target.value || 14 })} style={inputStyle} /></div>
+              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                <button onClick={() => setShowHousehold(false)} style={{ width: '100%', padding: '9px', borderRadius: '6px', border: 'none', background: 'var(--color-accent)', color: '#0A0A0A', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>Done</button>
+              </div>
             </div>
           </div>
         )}
@@ -1189,7 +1276,6 @@ function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
   const [items, setItems] = useState<KitItem[]>([])
   const [kitCount, setKitCount] = useState(0)
   const [loading, setLoading] = useState(true)
-  const household = loadHousehold()
 
   useEffect(() => {
     async function load() {
@@ -1275,7 +1361,7 @@ function PrepScore({ onOpenInventory }: { onOpenInventory: () => void }) {
             {expiredCount > 0 && <> &middot; <span style={{ color: 'var(--color-danger)' }}>{expiredCount} expired</span></>}
           </div>
           <div style={{ fontFamily: 'var(--font-body)', fontSize: '12px', color: 'var(--color-subtle)', marginTop: '4px' }}>
-            Scored for a household of {household.people} people{household.pets > 0 ? `, ${household.pets} pets` : ''}, {household.days}-day target. Adjust in Inventory Manager.
+            Each item is checked against its own par target. Every cache is sized separately in Inventory Manager.
           </div>
         </div>
       </div>
