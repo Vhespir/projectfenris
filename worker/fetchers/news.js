@@ -3,20 +3,28 @@ import pg from 'pg'
 
 const { Pool } = pg
 const pool = new Pool({ connectionString: process.env.DATABASE_URL })
-const parser = new Parser({ timeout: 15000, headers: { 'User-Agent': 'Mozilla/5.0 (compatible; FenrisBot/1.0)' } })
+// A handful of these feeds sit behind a WAF that specifically blocks
+// anything self-identifying as a bot. CISA and GDACS both went from a
+// blanket 403/406 to 200 in testing just by switching to a real browser UA
+// and Accept header, no other change. FEMA/PHMSA/NRC/IAEA stayed blocked
+// even with a browser UA, which points to an IP-range block instead
+// (plausible: cloud/hosting ASNs, including this app's host, are a common
+// target for that on .gov sites) rather than anything fixable here.
+const parser = new Parser({
+  timeout: 15000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+    'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
+  },
+})
 
-// Dedicated emergency/disaster feeds -- always relevant, no filtering needed
+// Dedicated emergency/disaster feeds, always relevant, no filtering needed
 const DEDICATED_FEEDS = [
   { url: 'https://www.nhc.noaa.gov/nhc_at1.xml',                                       source: 'NHC',        category: 'hurricane',     region: 'Atlantic' },
   { url: 'https://www.nhc.noaa.gov/nhc_ep1.xml',                                       source: 'NHC',        category: 'hurricane',     region: 'Eastern Pacific' },
   { url: 'https://www.nhc.noaa.gov/nhc_cp1.xml',                                       source: 'NHC',        category: 'hurricane',     region: 'Central Pacific' },
   { url: 'https://tsunami.gov/events/xml/PAAQAtom.xml',                                source: 'PTWC',       category: 'tsunami',       region: null },
-  { url: 'https://emergency.cdc.gov/han/rss_feed.asp',                                 source: 'CDC',        category: 'health',        region: null },
-  { url: 'https://emergency.cdc.gov/rss/index.asp',                                   source: 'CDC',        category: 'health',        region: null },
   { url: 'https://tools.cdc.gov/api/v2/resources/media/132608.rss',                    source: 'CDC',        category: 'health',        region: null },
-  { url: 'https://www.cdc.gov/rss/outbreaks.xml',                                      source: 'CDC',        category: 'health',        region: null },
-  { url: 'https://www.aphis.usda.gov/aphis/newsroom/news/rss',                         source: 'USDA APHIS', category: 'health',        region: null },
-  { url: 'https://promedmail.org/feed/',                                                source: 'ProMED',     category: 'health',        region: null },
   { url: 'https://www.usgs.gov/news/all-news/feed',                                    source: 'USGS',       category: 'science',       region: null },
   { url: 'https://www.fema.gov/about/news-multimedia/news/feed',                       source: 'FEMA',       category: 'emergency',     region: null },
   { url: 'https://www.fema.gov/feeds/news-releases.xml',                               source: 'FEMA',       category: 'emergency',     region: null },
@@ -28,42 +36,43 @@ const DEDICATED_FEEDS = [
   { url: 'https://www.nrc.gov/public-involve/listserver-subscription/news-rss.xml',    source: 'NRC',        category: 'nuclear',       region: null },
   { url: 'https://www.iaea.org/newscenter/news/rss',                                   source: 'IAEA',       category: 'nuclear',       region: null },
   { url: 'https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/recalls/rss.xml', source: 'FDA',   category: 'recall',        region: null },
-  { url: 'https://www.who.int/feeds/entity/csr/don/en/rss.xml',                        source: 'WHO',        category: 'health',        region: null },
   { url: 'https://www.gov.uk/foreign-travel-advice.atom',                               source: 'FCDO',       category: 'travel',        region: null },
   { url: 'https://www.arrl.org/news/rss',                                               source: 'ARRL',       category: 'comms',         region: null },
-  { url: 'https://www.epa.gov/rss/epa-newsroom.xml',                                   source: 'EPA',        category: 'environment',   region: null },
-  // CERT/CC's old kb.cert.org RSS endpoint (https://kb.cert.org/vuls/bypublished/rss/) 404s as of 2026-08 -- removed.
+  // Removed as dead as of 2026-08: emergency.cdc.gov/han/rss_feed.asp and
+  // /rss/index.asp (both retired, redirect to a plain HTML page now),
+  // cdc.gov/rss/outbreaks.xml (404), aphis.usda.gov (404), promedmail.org
+  // (404), who.int (404), epa.gov/rss/epa-newsroom.xml (404), and CERT/CC's
+  // kb.cert.org (404).
 ]
 
-// General news feeds -- filter by relevance keywords before storing
+// General news feeds, filter by relevance keywords before storing
 const GENERAL_FEEDS = [
   { url: 'https://feeds.npr.org/1001/rss.xml',                    source: 'NPR',                    category: 'news',          region: null },
   { url: 'https://feeds.npr.org/1003/rss.xml',                    source: 'NPR',                    category: 'news',          region: null },
   { url: 'https://feeds.npr.org/1057/rss.xml',                    source: 'NPR',                    category: 'environment',   region: null },
   { url: 'https://www.pbs.org/newshour/feeds/rss/headlines',      source: 'PBS',                    category: 'news',          region: null },
-  { url: 'https://rss.app/feeds/tXH0tNNUMF9KRbHH.xml',           source: 'Reuters',                category: 'news',          region: null },
   { url: 'https://feeds.skynews.com/feeds/rss/world.xml',         source: 'Sky News',               category: 'news',          region: null },
   { url: 'https://feeds.skynews.com/feeds/rss/us.xml',            source: 'Sky News',               category: 'news',          region: 'US' },
   { url: 'https://feeds.bbci.co.uk/news/world/rss.xml',           source: 'BBC',                    category: 'news',          region: null },
   { url: 'https://feeds.bbci.co.uk/news/science_and_environment/rss.xml', source: 'BBC',            category: 'environment',   region: null },
   { url: 'https://www.aljazeera.com/xml/rss/all.xml',             source: 'Al Jazeera',             category: 'news',          region: null },
   { url: 'https://www.un.org/press/en/rss.xml',                   source: 'UN',                     category: 'geopolitical',  region: null },
-  { url: 'https://www.nato.int/rss.xml',                          source: 'NATO',                   category: 'geopolitical',  region: null },
   { url: 'https://modernsurvivalblog.com/feed/',                   source: 'Modern Survival Blog',   category: 'preparedness',  region: null },
   { url: 'https://askaprepper.com/feed/',                          source: 'Ask a Prepper',          category: 'preparedness',  region: null },
-  { url: 'https://www.prepperwebsite.com/feed/',                   source: 'Prepper Website',        category: 'preparedness',  region: null },
   { url: 'https://www.shtfplan.com/feed/',                         source: 'SHTFplan',               category: 'preparedness',  region: null },
   { url: 'https://www.theorganicprepper.com/feed/',                source: 'The Organic Prepper',    category: 'preparedness',  region: null },
-  { url: 'https://www.backdoorsurvival.com/feed/',                 source: 'Backdoor Survival',      category: 'preparedness',  region: null },
   { url: 'https://www.offgridweb.com/feed/',                       source: 'Off Grid Web',           category: 'preparedness',  region: null },
   { url: 'https://survivopedia.com/feed/',                         source: 'Survivopedia',           category: 'preparedness',  region: null },
-  { url: 'https://graywolfsurvival.com/feed/',                     source: 'Gray Wolf Survival',     category: 'preparedness',  region: null },
   { url: 'https://survivalblog.com/feed/',                         source: 'Survival Blog',          category: 'preparedness',  region: null },
   { url: 'https://shtfpreparedness.com/feed/',                     source: 'SHTF Preparedness',      category: 'preparedness',  region: null },
-  { url: 'https://www.prepared.org/feed/',                         source: 'Prepared',               category: 'preparedness',  region: null },
   { url: 'https://www.fbi.gov/feeds/fbi-in-the-news/rss.xml',     source: 'FBI',                    category: 'security',      region: null },
   { url: 'https://www.federalreserve.gov/feeds/press_all.xml',    source: 'Federal Reserve',        category: 'financial',     region: null },
   { url: 'https://www.ams.usda.gov/market-news/rss',              source: 'USDA Market News',       category: 'financial',     region: null },
+  // Removed as dead as of 2026-08: rss.app Reuters proxy (404, expired),
+  // nato.int/rss.xml (404), prepperwebsite.com (domain sold, cert no longer
+  // matches), backdoorsurvival.com (525, origin unreachable),
+  // graywolfsurvival.com (domain doesn't resolve at all), prepared.org
+  // (malformed XML rss-parser can't recover from).
 ]
 
 const RELEVANCE_KEYWORDS = [

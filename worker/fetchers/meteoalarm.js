@@ -42,6 +42,27 @@ async function fetchCountry(country) {
   return data.warnings ?? []
 }
 
+// MeteoAlarm is 45 national met services each writing "event" in their own
+// language ("Vigilance orages", "Aviso de tormentas de nivel verde"...), so
+// using that field directly for event_type turns "Top Event Types" into a
+// wall of untranslated French and Spanish. Every alert also carries an
+// awareness_type CAP parameter ("3; Thunderstorm", "12; flooding") that's
+// the same standardized, already-English label regardless of source
+// country, that's the actual category to group and count by.
+function awarenessTypeLabel(info) {
+  const param = (info.parameter ?? []).find(p => p.valueName === 'awareness_type')
+  if (!param?.value) return null
+  const label = param.value.split(';')[1]?.trim()
+  if (!label) return null
+  return label.split(/[\s-]+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+}
+
+// Some alerts carry an English translation as a second <info> block
+// alongside the native-language one; prefer it for the human-readable title.
+function preferEnglish(infoList) {
+  return infoList.find(i => i?.language?.toLowerCase().startsWith('en')) ?? infoList[0]
+}
+
 async function storeAlert(source, eventType, title, severity, geomJson, properties, externalId, startsAt, expiresAt) {
   if (geomJson) {
     return pool.query(`
@@ -71,7 +92,8 @@ export async function fetchMeteoAlarm() {
       const alert = warning?.alert
       if (!alert) continue
 
-      const info = Array.isArray(alert.info) ? alert.info[0] : alert.info
+      const infoList = Array.isArray(alert.info) ? alert.info : [alert.info]
+      const info = preferEnglish(infoList.filter(Boolean))
       if (!info) continue
 
       const areas = Array.isArray(info.area) ? info.area : (info.area ? [info.area] : [])
@@ -85,9 +107,9 @@ export async function fetchMeteoAlarm() {
 
         const externalId = `${alert.identifier}-${i}`
         const severity = (info.severity === 'Unknown' || !info.severity) ? 'Minor' : info.severity
-        const eventType = info.event ?? 'weather_warning'
+        const eventType = awarenessTypeLabel(info) ?? info.event ?? 'Weather Warning'
         const areaDesc = area.areaDesc ?? ''
-        const title = `${eventType} - ${areaDesc}`
+        const title = `${info.event ?? eventType} - ${areaDesc}`
 
         const { rowCount } = await storeAlert(
           'meteoalarm',
