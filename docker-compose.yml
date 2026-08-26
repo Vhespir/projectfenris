@@ -99,18 +99,19 @@ services:
       - fenris-network
 
   frontend:
+    # Was running the bare Vite dev server (unminified, not meant for public
+    # internet exposure) as "prod" -- Dockerfile.prod actually builds a static
+    # production bundle and serves it with nginx. VITE_CESIUM_ION_TOKEN moved
+    # from a runtime env var to a build arg accordingly: Vite bakes VITE_-
+    # prefixed vars into the bundle at build time, not request time, when it's
+    # a real build rather than the dev server. Changing this value now needs a
+    # redeploy (which rebuilds the image) to take effect, not just a restart.
     build:
       context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_CESIUM_ION_TOKEN: ${VITE_CESIUM_ION_TOKEN}
     restart: unless-stopped
-    environment:
-      NODE_ENV: development
-      # Cesium's Ion.defaultAccessToken (CesiumMap.tsx) -- without this, Cesium
-      # ion rejects every terrain/imagery request with InvalidCredentials, which
-      # is what "map page isn't working" actually was. Vite reads VITE_-prefixed
-      # vars from process.env at request time in dev-server mode (which is what
-      # actually runs in prod here), so setting this and redeploying is enough --
-      # no rebuild needed.
-      VITE_CESIUM_ION_TOKEN: ${VITE_CESIUM_ION_TOKEN}
     networks:
       - fenris-network
       - coolify
