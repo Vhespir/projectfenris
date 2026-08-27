@@ -39,17 +39,22 @@ per-state effort, not a single build.
 
 ## Life-saving features
 
-- **Web Push notifications**: proposed as the highest-leverage next step
-  for the existing alert system. Email is passive and often too slow for
-  an acute threat (tornado warning, minutes matter), push is free (no
-  per-message cost, unlike SMS) and reaches people within seconds even if
-  the site isn't open. Reuses the exact matching logic already in
-  `worker/lib/alerts.js`, just adds a second delivery channel. Needs: a
-  service worker, VAPID keys, a push-subscription table, and a
-  `sendAlertPush` alongside the existing `sendAlertEmail`.
+- ~~Web Push notifications~~: **shipped.** Reuses the exact proximity +
+  severity matching logic in `worker/lib/alerts.js`, adds a second
+  delivery channel alongside email (`worker/lib/push.js`, `api/routes/
+  push.js`, `frontend/public/sw.js`, a Settings toggle). Needs
+  `VAPID_PUBLIC_KEY`/`VAPID_PRIVATE_KEY` set (see `.env.example`) to
+  actually send; silently skipped otherwise, same as unset RESEND_API_KEY
+  already did for email. Also fixed while in there: the alert check used
+  to only look at events fetched in the last 20 minutes, so an event
+  fetched during a worker downtime gap (a deploy, a crash) longer than
+  that silently never got alerted on, no retry. Now checks every
+  currently-active severe/extreme event every cycle and relies on the
+  `event_alerts` table's per-user-per-event primary key to prevent
+  double-sends, which is the actual right tool for that job.
 - **Site-wide banner for an active severe event near you**: catches
   anyone browsing who hasn't (or can't) grant push permission. Cheap,
-  complements push rather than replacing it.
+  complements push rather than replacing it. Not built yet.
 - SMS alerts: more reliable than push for someone without the browser
   permission granted, but has a real per-message cost (Twilio-class
   pricing). Worth it only if push turns out not to be enough.

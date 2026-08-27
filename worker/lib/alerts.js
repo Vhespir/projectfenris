@@ -1,4 +1,5 @@
 import { sendAlertEmail } from './email.js'
+import { sendAlertPush } from './push.js'
 
 const SEVERITY_ORDER = { minor: 0, moderate: 1, severe: 2, extreme: 3 }
 
@@ -33,18 +34,33 @@ function categoryAllowed(eventType, userCategories) {
 }
 
 export async function checkPendingAlerts(pool) {
-  if (!process.env.RESEND_API_KEY) return
+  // Neither channel being configured means there's nothing this function
+  // can do; either one alone is enough to proceed; the per-user checks
+  // further down (notification_prefs.email / push subscriptions existing)
+  // decide who actually gets which channel.
+  const emailReady = !!process.env.RESEND_API_KEY
+  const pushReady = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY)
+  if (!emailReady && !pushReady) return
 
   let events
   try {
     const { rows } = await pool.query(`
-      SELECT id, source, event_type, title, severity, properties, starts_at, expires_at, geometry
+      SELECT id, source, event_type, title, severity, slug, properties, starts_at, expires_at, geometry
       FROM disaster_events
       WHERE severity IN ('Extreme', 'Severe')
-        AND fetched_at > NOW() - INTERVAL '20 minutes'
         AND (expires_at IS NULL OR expires_at > NOW())
         AND geometry IS NOT NULL
     `)
+    // Previously restricted to fetched_at > NOW() - INTERVAL '20 minutes',
+    // meant to avoid re-scanning the whole active-severe-event set every
+    // cycle. That silently dropped any event fetched during a worker gap
+    // longer than 20 minutes (a deploy, a crash, a VPS hiccup): once that
+    // window passed, the event just never got alerted on, no retry, no
+    // catch-up, nothing logged. The event_alerts table's (user_id,
+    // event_id) primary key already guarantees no one gets double-alerted
+    // for the same event, so it's what should be doing this job, not a
+    // time window: every currently-active severe/extreme event gets
+    // checked every cycle, regardless of when it was first fetched.
     events = rows
   } catch (err) {
     console.error('[alerts] failed to fetch events:', err.message)
@@ -66,7 +82,10 @@ export async function checkPendingAlerts(pool) {
         FROM users u
         WHERE u.user_lat IS NOT NULL
           AND u.user_lon IS NOT NULL
-          AND (u.notification_prefs->>'email')::boolean = true
+          AND (
+            (u.notification_prefs->>'email')::boolean = true
+            OR (u.notification_prefs->>'push')::boolean = true
+          )
           AND ST_DWithin(
             ST_SetSRID(ST_MakePoint(u.user_lon, u.user_lat), 4326)::geography,
             ST_Centroid($1::geometry)::geography,
@@ -90,7 +109,15 @@ export async function checkPendingAlerts(pool) {
       if (!severityMeetsThreshold(event.severity, prefs.severity ?? 'severe')) continue
       if (!categoryAllowed(event.event_type, prefs.categories)) continue
 
-      await sendAlertEmail({ to: user.email, username: user.username, event })
+      // A user can genuinely want only one channel (push but not email, or
+      // vice versa), and either being unconfigured on this deploy shouldn't
+      // block the other, so these are independent, not else-branches.
+      if (emailReady && prefs.email) {
+        await sendAlertEmail({ to: user.email, username: user.username, event })
+      }
+      if (pushReady && prefs.push) {
+        await sendAlertPush(pool, user, event)
+      }
 
       try {
         await pool.query(

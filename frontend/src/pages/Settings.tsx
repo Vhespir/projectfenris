@@ -2,6 +2,7 @@ import { useState, useEffect, type FormEvent, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
+import { pushSupported, subscribeToPush, unsubscribeFromPush } from '../utils/push'
 
 const THREAT_OPTIONS = [
   'Tornado', 'Hurricane', 'Earthquake', 'Wildfire', 'Flood',
@@ -83,10 +84,13 @@ export default function Settings() {
   })
   const [notifPrefs, setNotifPrefs] = useState({
     email: true,
+    push: false,
     severity: 'severe',
     categories: ALL_CATEGORY_IDS,
     radius_km: 150,
   })
+  const [pushBusy, setPushBusy] = useState(false)
+  const [pushError, setPushError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -129,6 +133,7 @@ export default function Settings() {
         if (data.notification_prefs) {
           setNotifPrefs({
             email:      data.notification_prefs.email      ?? true,
+            push:       data.notification_prefs.push       ?? false,
             severity:   data.notification_prefs.severity   ?? 'severe',
             categories: data.notification_prefs.categories ?? ALL_CATEGORY_IDS,
             radius_km:  data.notification_prefs.radius_km  ?? 150,
@@ -142,6 +147,47 @@ export default function Settings() {
       ...f,
       [key]: f[key].includes(val) ? f[key].filter(x => x !== val) : [...f[key], val],
     }))
+  }
+
+  // Push on/off is saved immediately, not held for the main Save button:
+  // the subscription itself (browser permission + endpoint on file) and
+  // the notification_prefs.push flag the worker actually checks need to
+  // agree right away, otherwise a granted subscription with the flag still
+  // off would just never fire, or a revoked one would keep the flag on.
+  async function savePushPref(push: boolean) {
+    const res = await fetch('/api/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ notification_prefs: { push } }),
+    })
+    if (res.ok) setNotifPrefs(p => ({ ...p, push }))
+    return res.ok
+  }
+
+  async function handleTogglePush() {
+    setPushError(null)
+    if (notifPrefs.push) {
+      setPushBusy(true)
+      try {
+        await unsubscribeFromPush()
+        await savePushPref(false)
+      } finally {
+        setPushBusy(false)
+      }
+      return
+    }
+    if (!pushSupported()) {
+      setPushError("This browser doesn't support push notifications.")
+      return
+    }
+    setPushBusy(true)
+    try {
+      const ok = await subscribeToPush()
+      if (ok) await savePushPref(true)
+      else setPushError('Push permission was denied or the subscription failed. Check your browser notification settings.')
+    } finally {
+      setPushBusy(false)
+    }
   }
 
   async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -515,6 +561,39 @@ export default function Settings() {
               }} />
             </button>
           </div>
+
+          {/* Push toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', padding: '12px 14px', background: 'var(--color-bg)', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
+            <div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)', marginBottom: '2px' }}>Push Notifications</div>
+              <div style={{ fontSize: '12px', color: 'var(--color-muted)' }}>
+                Get an instant notification on this device for high-severity events near you, even with the site closed. Faster than email for anything time-sensitive.
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleTogglePush}
+              disabled={pushBusy}
+              style={{
+                width: '44px', height: '24px', borderRadius: '12px', border: 'none', flexShrink: 0,
+                cursor: pushBusy ? 'not-allowed' : 'pointer',
+                background: notifPrefs.push ? 'var(--color-accent)' : 'var(--color-border)',
+                position: 'relative', transition: 'background 0.2s', opacity: pushBusy ? 0.6 : 1,
+              }}
+              aria-label="Toggle push notifications"
+            >
+              <span style={{
+                position: 'absolute', top: '3px',
+                left: notifPrefs.push ? '23px' : '3px',
+                width: '18px', height: '18px', borderRadius: '50%',
+                background: '#fff', transition: 'left 0.2s',
+              }} />
+            </button>
+          </div>
+          {pushError && (
+            <div style={{ fontSize: '12px', color: 'var(--color-danger)', marginBottom: '20px' }}>{pushError}</div>
+          )}
+          {!pushError && <div style={{ marginBottom: '20px' }} />}
 
           {notifPrefs.email && (
             <>

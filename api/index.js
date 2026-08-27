@@ -23,6 +23,7 @@ import { frequencyRoutes } from './routes/frequencies.js'
 import { inventoryRoutes } from './routes/inventory.js'
 import { gardenRoutes } from './routes/garden.js'
 import { refRoutes } from './routes/refs.js'
+import { pushRoutes } from './routes/push.js'
 import { checkMuted } from './lib/moderation.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
@@ -395,6 +396,7 @@ await app.register(frequencyRoutes, { pool })
 await app.register(inventoryRoutes, { pool })
 await app.register(gardenRoutes, { pool })
 await app.register(refRoutes, { pool })
+await app.register(pushRoutes, { pool })
 
 try {
   await runMigrations(process.env.DATABASE_URL)
