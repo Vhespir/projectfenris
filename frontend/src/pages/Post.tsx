@@ -178,6 +178,16 @@ export default function PostPage() {
     if (res.ok) navigate('/community')
   }
 
+  async function handleRemoveLocation() {
+    if (!confirm('Remove the location pin from this post? The report stays up, it just stops showing on the map.')) return
+    const res = await fetch(`/api/posts/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clear_location: true }),
+    })
+    if (res.ok) setPost(p => p ? { ...p, location_label: null, latitude: null, longitude: null } : p)
+  }
+
   async function handleDeleteMedia(mediaId: number) {
     if (!confirm('Remove this photo/video?')) return
     const res = await fetch(`/api/posts/${id}/media/${mediaId}`, { method: 'DELETE' })
@@ -402,6 +412,11 @@ export default function PostPage() {
             <span style={{ fontSize: '12px', color: 'var(--color-subtle)', fontFamily: 'var(--font-mono)' }}>
               {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
             </span>
+            {isAuthor && post.latitude != null && (
+              <button onClick={handleRemoveLocation} title="Take this post's pin off the map without deleting the post" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', background: 'none', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-muted)', cursor: 'pointer', padding: '2px 8px' }}>
+                Remove location
+              </button>
+            )}
             {isAuthor && !editingPost && (
               <button onClick={() => { setEditTitle(post.title); setEditBody(post.body); setEditingPost(true) }} style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', background: 'none', border: '1px solid var(--color-border)', borderRadius: '4px', color: 'var(--color-muted)', cursor: 'pointer', padding: '2px 8px' }}>
                 Edit

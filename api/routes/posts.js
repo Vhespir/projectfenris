@@ -396,10 +396,11 @@ export async function postRoutes(app, { pool }) {
     const postId = Number(req.params.id)
     const {
       title, body, location_label, state, duration,
-      what_worked, what_failed, wish_had, key_takeaway,
+      what_worked, what_failed, wish_had, key_takeaway, clear_location,
     } = req.body ?? {}
     const nothingToUpdate = [title, body, location_label, state, duration, key_takeaway].every(v => !v?.trim?.())
       && what_worked === undefined && what_failed === undefined && wish_had === undefined
+      && !clear_location
     if (nothingToUpdate) {
       return reply.code(400).send({ error: 'Nothing to update' })
     }
@@ -418,26 +419,34 @@ export async function postRoutes(app, { pool }) {
       ? (Array.isArray(arr) ? arr.map(s => String(s).trim()).filter(Boolean) : [])
       : null
 
+    // clear_location is a one-way "take this pin down" action, distinct
+    // from the COALESCE fields above: sending latitude/longitude as null
+    // through COALESCE would just mean "no change" (COALESCE only replaces
+    // an actual NULL parameter, and there'd be no way to tell "not
+    // provided" apart from "please clear it"), so this needs its own
+    // explicit branch to actually null the columns out.
     const { rows: updated } = await pool.query(`
       UPDATE posts SET
         title          = COALESCE($1, title),
         body           = COALESCE($2, body),
-        location_label = COALESCE($3, location_label),
+        location_label = CASE WHEN $10 THEN NULL ELSE COALESCE($3, location_label) END,
         state          = COALESCE($4, state),
         duration       = COALESCE($5, duration),
         what_worked    = COALESCE($6, what_worked),
         what_failed    = COALESCE($7, what_failed),
         wish_had       = COALESCE($8, wish_had),
         key_takeaway   = COALESCE($9, key_takeaway),
+        latitude       = CASE WHEN $10 THEN NULL ELSE latitude END,
+        longitude      = CASE WHEN $10 THEN NULL ELSE longitude END,
         updated_at     = NOW()
-      WHERE id = $10
-      RETURNING id, title, body, location_label, state, duration,
+      WHERE id = $11
+      RETURNING id, title, body, location_label, latitude, longitude, state, duration,
                 what_worked, what_failed, wish_had, key_takeaway, updated_at
     `, [
       title?.trim() || null, body?.trim() || null,
       location_label?.trim() || null, state?.trim() || null, duration?.trim() || null,
       clean(what_worked), clean(what_failed), clean(wish_had),
-      key_takeaway?.trim() || null, postId,
+      key_takeaway?.trim() || null, !!clear_location, postId,
     ])
     return updated[0]
   })
