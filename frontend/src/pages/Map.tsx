@@ -12,13 +12,12 @@ const SOURCES = [
 ]
 
 const OVERLAYS = [
-  { key: 'radar',           label: 'Radar' },
-  { key: 'alerts',          label: 'Weather Alerts' },
-  { key: 'traffic',         label: 'Air Traffic' },
-  { key: 'fires',           label: 'Fires' },
-  { key: 'satellite_daily', label: 'Satellite (Daily, Global)' },
-  { key: 'satellite_hires', label: 'Satellite (High-Res)' },
-  { key: 'reports',         label: 'Citizen Reports' },
+  { key: 'radar',          label: 'Radar' },
+  { key: 'alerts',         label: 'Weather Alerts' },
+  { key: 'traffic',        label: 'Air Traffic' },
+  { key: 'fires',          label: 'Fires' },
+  { key: 'satellite_live', label: 'Live Satellite (Americas)' },
+  { key: 'reports',        label: 'Citizen Reports' },
 ]
 
 const FIRE_RANGES: { key: FireTimeRange; label: string; desc: string }[] = [
@@ -96,7 +95,48 @@ export default function MapPage() {
   const [legendOpen, setLegendOpen] = useState(false)
   const [measureMode, setMeasureMode] = useState(false)
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<{ label: string; lat: number; lon: number }[]>([])
+  const [searching, setSearching] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+
   const flyToRef = useRef<((lat: number, lon: number) => void) | null>(null)
+  const searchBoxRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) setSearchOpen(false)
+    }
+    document.addEventListener('mousedown', onClickOutside)
+    return () => document.removeEventListener('mousedown', onClickOutside)
+  }, [])
+
+  async function runSearch(e?: React.FormEvent) {
+    e?.preventDefault()
+    const q = searchQuery.trim()
+    if (!q) return
+    setSearching(true)
+    try {
+      const res = await fetch(`/api/external/geocode?q=${encodeURIComponent(q)}`)
+      const data = await res.json()
+      const results = Array.isArray(data) ? data : []
+      setSearchResults(results)
+      setSearchOpen(true)
+      // Only one plausible match (or the user already picked from a list and
+      // is hitting Enter again): just fly there instead of making them click.
+      if (results.length === 1) {
+        flyToRef.current?.(results[0].lat, results[0].lon)
+        setSearchOpen(false)
+      }
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  function selectSearchResult(r: { lat: number; lon: number }) {
+    flyToRef.current?.(r.lat, r.lon)
+    setSearchOpen(false)
+  }
 
   useEffect(() => {
     fetch('/api/events?sources=usgs,gdacs,epa,eonet&limit=1000')
@@ -194,6 +234,51 @@ export default function MapPage() {
         ))}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+          <div ref={searchBoxRef} style={{ position: 'relative' }}>
+            <form onSubmit={runSearch} style={{ display: 'flex' }}>
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                onFocus={() => searchResults.length > 0 && setSearchOpen(true)}
+                placeholder="Go to a place..."
+                style={{
+                  width: '160px', padding: '5px 10px', borderRadius: '5px 0 0 5px', fontSize: '12px',
+                  fontFamily: 'var(--font-mono)', background: 'var(--color-bg)',
+                  border: '1px solid var(--color-border)', borderRight: 'none',
+                  color: 'var(--color-text)', outline: 'none',
+                }}
+              />
+              <button type="submit" disabled={searching} style={{
+                padding: '5px 10px', borderRadius: '0 5px 5px 0', fontSize: '12px', fontFamily: 'var(--font-mono)',
+                cursor: searching ? 'not-allowed' : 'pointer', border: '1px solid var(--color-border)',
+                background: 'var(--color-surface-elevated)', color: 'var(--color-muted)',
+              }}>
+                {searching ? '...' : 'Go'}
+              </button>
+            </form>
+            {searchOpen && searchResults.length > 0 && (
+              <div style={{
+                position: 'absolute', top: 'calc(100% + 4px)', right: 0, width: '280px', zIndex: 20,
+                background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '6px',
+                boxShadow: '0 6px 20px rgba(0,0,0,0.4)', overflow: 'hidden',
+              }}>
+                {searchResults.map((r, i) => (
+                  <button
+                    key={i}
+                    onClick={() => selectSearchResult(r)}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                      fontSize: '12px', color: 'var(--color-text)', background: 'none', border: 'none',
+                      borderBottom: i < searchResults.length - 1 ? '1px solid var(--color-border)' : 'none',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setMeasureMode(v => !v)}
             style={btn(measureMode, '#A78BFA')}
