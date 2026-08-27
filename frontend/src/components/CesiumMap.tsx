@@ -207,7 +207,6 @@ export default function CesiumMap({
   const eventsSourceRef = useRef<CustomDataSource | null>(null)
   const atSourceRef = useRef<CustomDataSource | null>(null)
   const firmsLayerRef = useRef<ImageryLayer | null>(null)
-  const satelliteLayerRef = useRef<ImageryLayer | null>(null)
   const reportsSourceRef = useRef<CustomDataSource | null>(null)
 
   const atStatesRef = useRef<unknown[][]>([])
@@ -724,60 +723,6 @@ export default function CesiumMap({
       }
     }
   }, [firesActive, fireRange])
-
-  // ── Live satellite (GOES-East + GOES-West GeoColor) ─────────────────────────
-  // The old daily-MODIS layer here got removed: real gaps (see git history),
-  // and only ever "yesterday", not actually live. GOES-East/West are
-  // geostationary (fixed viewpoint, continuous full-disk coverage, no
-  // orbital gaps) and GIBS updates each one every 10 minutes. Requesting
-  // time "default" always resolves to whatever the latest available scan
-  // is, confirmed against GIBS's own capabilities document. GeoColor is
-  // NOAA's true-color-by-day / IR-plus-city-lights-by-night composite, so
-  // it looks right around the clock instead of going black at night.
-  // Coverage is the Americas and both oceans on either side, not the whole
-  // globe: there's no equivalent Meteosat/Himawari composite in GIBS to
-  // cover Europe/Africa/Asia, so this is honestly labeled accordingly.
-  const liveSatelliteActive = activeOverlays.has('satellite_live')
-  useEffect(() => {
-    const viewer = viewerRef.current
-    if (!viewer) return
-
-    if (!liveSatelliteActive) {
-      if (satelliteLayerRef.current) {
-        viewer.imageryLayers.remove(satelliteLayerRef.current)
-        satelliteLayerRef.current = null
-      }
-      return
-    }
-
-    const goesEast = new ImageryLayer(
-      new UrlTemplateImageryProvider({
-        url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/default/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png',
-        maximumLevel: 7,
-        credit: new Credit('NOAA / NASA EOSDIS GIBS / GOES-East'),
-      })
-    )
-    const goesWest = new ImageryLayer(
-      new UrlTemplateImageryProvider({
-        url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-West_ABI_GeoColor/default/default/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png',
-        maximumLevel: 7,
-        credit: new Credit('NOAA / NASA EOSDIS GIBS / GOES-West'),
-      })
-    )
-    viewer.imageryLayers.add(goesWest)
-    viewer.imageryLayers.add(goesEast)
-    // Only one ref to clean up both: they're always added/removed together.
-    satelliteLayerRef.current = goesEast
-    const secondLayer = goesWest
-
-    return () => {
-      if (viewerRef.current) {
-        viewerRef.current.imageryLayers.remove(secondLayer)
-        if (satelliteLayerRef.current) viewerRef.current.imageryLayers.remove(satelliteLayerRef.current)
-      }
-      satelliteLayerRef.current = null
-    }
-  }, [liveSatelliteActive])
 
   // ── Citizen reports (first-hand field reports + self-reported news) ─────────
   const reportsActive = activeOverlays.has('reports')

@@ -12,12 +12,11 @@ const SOURCES = [
 ]
 
 const OVERLAYS = [
-  { key: 'radar',          label: 'Radar' },
-  { key: 'alerts',         label: 'Weather Alerts' },
-  { key: 'traffic',        label: 'Air Traffic' },
-  { key: 'fires',          label: 'Fires' },
-  { key: 'satellite_live', label: 'Live Satellite (Americas)' },
-  { key: 'reports',        label: 'Citizen Reports' },
+  { key: 'radar',   label: 'Radar' },
+  { key: 'alerts',  label: 'Weather Alerts' },
+  { key: 'traffic', label: 'Air Traffic' },
+  { key: 'fires',   label: 'Fires' },
+  { key: 'reports', label: 'Citizen Reports' },
 ]
 
 const FIRE_RANGES: { key: FireTimeRange; label: string; desc: string }[] = [
