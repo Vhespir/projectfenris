@@ -684,7 +684,7 @@ export default function CesiumMap({
     }
   }, [firesActive, fireRange])
 
-  // ── Field reports ────────────────────────────────────────────────────────────
+  // ── Citizen reports (first-hand field reports + self-reported news) ─────────
   const reportsActive = activeOverlays.has('reports')
   useEffect(() => {
     const viewer = viewerRef.current
@@ -699,14 +699,17 @@ export default function CesiumMap({
     }
 
     if (!reportsSourceRef.current) {
-      reportsSourceRef.current = new CustomDataSource('field-reports')
+      reportsSourceRef.current = new CustomDataSource('citizen-reports')
       setupClustering(reportsSourceRef.current, 50)
       viewer.dataSources.add(reportsSourceRef.current)
     }
 
     async function fetchReports() {
       try {
-        const res = await fetch('/api/posts?type=field_report&limit=100')
+        // Ground truth from people actually there, not just official feeds:
+        // field reports (structured, category-tagged) and self-reported news
+        // (someone posting what they're seeing before any outlet covers it).
+        const res = await fetch('/api/posts?channels=field,news&limit=150')
         if (!res.ok || !reportsSourceRef.current) return
         const posts = await res.json()
         reportsSourceRef.current.entities.removeAll()
@@ -716,11 +719,17 @@ export default function CesiumMap({
           const diff = Date.now() - new Date(post.created_at).getTime()
           const mins = Math.floor(diff / 60000)
           const age = mins < 60 ? `${mins}m ago` : mins < 1440 ? `${Math.floor(mins / 60)}h ago` : `${Math.floor(mins / 1440)}d ago`
+          const isNews = post.post_type === 'self_reported_news'
+          const color = isNews ? '#38BDF8' : '#F59E0B'
+          const kindLabel = isNews ? 'Self-Reported News' : `Field Report · ${esc(post.category)}`
+          const mediaThumb = Array.isArray(post.media) && post.media[0]
+            ? `<img src="${esc(post.media[0].thumbnail_url ?? post.media[0].url)}" style="width:100%;max-height:120px;object-fit:cover;border-radius:4px;margin-bottom:8px" />`
+            : ''
 
           reportsSourceRef.current.entities.add({
             position: Cartesian3.fromDegrees(post.longitude, post.latitude),
             billboard: {
-              image: svgUrl('diamond', '#F59E0B', 22),
+              image: svgUrl('diamond', color, 22),
               width: 22,
               height: 22,
               disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -728,10 +737,11 @@ export default function CesiumMap({
             },
             description: `
               <div style="font-family:'Space Grotesk',sans-serif;min-width:220px;background:#111111;color:#F4F4F5;border-radius:6px">
-                <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#F59E0B;margin-bottom:4px">
-                  Field Report · ${esc(post.category)}
+                <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:${color};margin-bottom:4px">
+                  ${kindLabel}
                 </div>
                 <div style="font-weight:600;font-size:14px;margin-bottom:8px;line-height:1.3">${esc(post.title)}</div>
+                ${mediaThumb}
                 <div style="font-size:12px;color:#71717A;display:flex;gap:8px">
                   <span>▲ ${post.upvote_count}</span>
                   <span>·</span>
@@ -740,7 +750,7 @@ export default function CesiumMap({
                   <span>${age}</span>
                 </div>
                 <div style="margin-top:10px">
-                  <a href="/post/${post.id}" style="font-size:12px;color:#F59E0B;text-decoration:none;font-weight:600">
+                  <a href="/post/${post.id}" style="font-size:12px;color:${color};text-decoration:none;font-weight:600">
                     View full report →
                   </a>
                 </div>

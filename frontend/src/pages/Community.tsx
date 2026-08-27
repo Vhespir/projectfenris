@@ -6,6 +6,16 @@ import { getTier } from '../utils/tier'
 import { useSocket } from '../context/SocketContext'
 import { MentionTextarea } from '../components/MentionTextarea'
 
+interface PostMedia {
+  id: number
+  media_type: 'photo' | 'video'
+  url: string
+  thumbnail_url: string | null
+  width: number | null
+  height: number | null
+  duration_seconds: number | null
+}
+
 interface Post {
   id: number
   post_type: string
@@ -19,6 +29,7 @@ interface Post {
   username: string | null
   reputation: number
   is_founding_member?: boolean
+  media?: PostMedia[]
 }
 
 interface Channel {
@@ -190,6 +201,21 @@ function PostCard({ post, currentUser }: { post: Post; currentUser: { id: number
       <div style={{ fontSize: '13px', color: 'var(--color-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
         {post.body.length > 140 ? post.body.slice(0, 140) + '...' : post.body}
       </div>
+      {Array.isArray(post.media) && post.media.length > 0 && (
+        <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+          {post.media.slice(0, 4).map(m => (
+            <div key={m.id} style={{ position: 'relative', width: '72px', height: '72px', borderRadius: '5px', overflow: 'hidden', flexShrink: 0, background: 'var(--color-bg)' }}>
+              <img src={m.thumbnail_url ?? m.url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              {m.media_type === 'video' && (
+                <span style={{
+                  position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '18px', color: '#FFF', textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+                }}>▶</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', fontFamily: 'var(--font-mono)' }}>
         <button onClick={e => handleVote('up', e)} disabled={voting} style={{
           display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '4px',
@@ -278,6 +304,20 @@ export default function Community() {
     wish_had: [] as string[],
     key_takeaway: '',
   })
+  const [mediaFiles, setMediaFiles] = useState<File[]>([])
+  const [uploadingMedia, setUploadingMedia] = useState(false)
+
+  const MAX_MEDIA_FILES = 4
+
+  function addMediaFiles(files: FileList | null) {
+    if (!files) return
+    const valid = [...files].filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'))
+    setMediaFiles(prev => [...prev, ...valid].slice(0, MAX_MEDIA_FILES))
+  }
+
+  function removeMediaFile(index: number) {
+    setMediaFiles(prev => prev.filter((_, i) => i !== index))
+  }
 
   function selectChannel(id: string) {
     const ch = CHANNELS.find(c => c.id === id) ?? CHANNELS[0]
@@ -364,8 +404,28 @@ export default function Community() {
       })
       const data = await res.json()
       if (!res.ok) { setFormError(data.error); return }
+
+      if (mediaFiles.length > 0) {
+        setUploadingMedia(true)
+        const body = new FormData()
+        for (const f of mediaFiles) body.append('media', f)
+        const mediaRes = await fetch(`/api/posts/${data.id}/media`, { method: 'POST', body })
+          .catch(() => null)
+        if (!mediaRes || !mediaRes.ok) {
+          const err = mediaRes ? await mediaRes.json().catch(() => ({})) : {}
+          window.alert(err.error ?? 'Post was created, but the attached media failed to upload.')
+        } else {
+          const result = await mediaRes.json().catch(() => null)
+          if (result?.skipped?.length) {
+            window.alert(`${result.skipped.length} file(s) were skipped: ${result.skipped.map((s: { reason: string }) => s.reason).join(', ')}`)
+          }
+        }
+        setUploadingMedia(false)
+      }
+
       setShowForm(false)
       setForm(f => ({ ...f, title: '', body: '', location_label: '', latitude: '', longitude: '' }))
+      setMediaFiles([])
       loadPosts()
     } catch {
       setFormError('Something went wrong.')
@@ -530,7 +590,7 @@ export default function Community() {
                 </div>
               )}
 
-              {/* Type + category -- only shown when not a fixed channel */}
+              {/* Type + category: only shown when not a fixed channel */}
               {!isFixedChannel && (
                 <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '12px' }}>
                   <div>
@@ -644,13 +704,56 @@ export default function Community() {
                 </div>
               )}
 
-              <button type="submit" disabled={submitting} style={{
+              <div>
+                <label style={labelStyle}>Photos / Video (optional, up to {MAX_MEDIA_FILES})</label>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {mediaFiles.map((f, i) => (
+                    <div key={i} style={{ position: 'relative', width: '64px', height: '64px', borderRadius: '5px', overflow: 'hidden', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+                      {f.type.startsWith('image/') ? (
+                        <img src={URL.createObjectURL(f)} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px' }}>🎬</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeMediaFile(i)}
+                        style={{
+                          position: 'absolute', top: '2px', right: '2px', width: '18px', height: '18px',
+                          borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.65)', color: '#FFF',
+                          fontSize: '11px', lineHeight: '18px', textAlign: 'center', cursor: 'pointer', padding: 0,
+                        }}
+                      >×</button>
+                    </div>
+                  ))}
+                  {mediaFiles.length < MAX_MEDIA_FILES && (
+                    <label style={{
+                      width: '64px', height: '64px', borderRadius: '5px', border: '1px dashed var(--color-border)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+                      color: 'var(--color-subtle)', fontSize: '22px',
+                    }}>
+                      +
+                      <input
+                        type="file"
+                        accept="image/*,video/*"
+                        multiple
+                        onChange={e => { addMediaFiles(e.target.files); e.target.value = '' }}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                  )}
+                </div>
+                <div style={{ marginTop: '5px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)' }}>
+                  Photos up to 15MB. Videos are trimmed to 60 seconds and compressed automatically.
+                </div>
+              </div>
+
+              <button type="submit" disabled={submitting || uploadingMedia} style={{
                 padding: '10px', borderRadius: '6px', fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-                background: submitting ? 'var(--color-border)' : 'var(--color-accent)',
-                color: submitting ? 'var(--color-muted)' : '#0A0A0A', border: 'none',
+                cursor: (submitting || uploadingMedia) ? 'not-allowed' : 'pointer',
+                background: (submitting || uploadingMedia) ? 'var(--color-border)' : 'var(--color-accent)',
+                color: (submitting || uploadingMedia) ? 'var(--color-muted)' : '#0A0A0A', border: 'none',
               }}>
-                {submitting ? 'Posting...' : 'Submit Post'}
+                {uploadingMedia ? 'Uploading media...' : submitting ? 'Posting...' : 'Submit Post'}
               </button>
             </form>
           )}
@@ -667,7 +770,7 @@ export default function Community() {
                 letterSpacing: '0.03em',
               }}
             >
-              New posts available -- click to refresh
+              New posts available, click to refresh
             </button>
           )}
 
