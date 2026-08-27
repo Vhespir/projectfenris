@@ -216,6 +216,11 @@ function LiveFeedContent({ data, config, onSetConfig }: {
 }) {
   const { open: openDrawer } = useContextDrawer()
   const navigate = useNavigate()
+  // A fixed 10 regardless of how tall the widget was made meant enlarging it
+  // just added blank space below the same 10 rows. Show up to 20 instead so
+  // a taller widget actually has more to show; the panel's own scroll
+  // handles it when there's more than fits.
+  const DISPLAY_LIMIT = 20
 
   const showEvents = config?.showEvents !== false
   const showNews   = config?.showNews   !== false
@@ -313,7 +318,7 @@ function LiveFeedContent({ data, config, onSetConfig }: {
   return (
     <div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1px', background: 'var(--color-border)' }}>
-        {rows.slice(0, 10).map(row => (
+        {rows.slice(0, DISPLAY_LIMIT).map(row => (
           <div key={row.key} style={{ background: 'var(--color-surface)', padding: '9px 14px', borderLeft: `3px solid ${row.color}` }}>
             <div
               onClick={() => {
@@ -351,9 +356,9 @@ function LiveFeedContent({ data, config, onSetConfig }: {
           </div>
         ))}
       </div>
-      {rows.length > 10 && (
+      {rows.length > DISPLAY_LIMIT && (
         <Link to="/feed" style={{ display: 'block', padding: '10px 14px', background: 'var(--color-surface)', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-muted)', textDecoration: 'none', textAlign: 'center' }}>
-          +{rows.length - 10} more in the full feed
+          +{rows.length - DISPLAY_LIMIT} more in the full feed
         </Link>
       )}
       {configPanel}
@@ -383,7 +388,7 @@ function MapAutoResize() {
 
 function RadarWidgetContent() {
   return (
-    <div style={{ height: '280px' }}>
+    <div style={{ height: '100%' }}>
       <MapContainer
         center={[40, -95]} zoom={3}
         scrollWheelZoom={false} zoomControl={false}
@@ -404,7 +409,7 @@ function RadarWidgetContent() {
 function MapContent({ data }: { data: DashData }) {
   const mapEvents = useMemo(() => data.events.filter(e => ALL_MAP_SOURCES.has(e.source)), [data.events])
   return (
-    <div style={{ position: 'relative', height: '360px' }}>
+    <div style={{ position: 'relative', height: '100%', minHeight: '280px' }}>
       <MapContainer
         center={[30, -10]} zoom={2}
         scrollWheelZoom={false} zoomControl={true}
@@ -464,7 +469,7 @@ function EventCountsContent({ data, config, onSetConfig }: {
   }
 
   const sevOrder = ['Extreme', 'Severe', 'Moderate', 'Minor']
-  const topTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 6)
+  const topTypes = Object.entries(byType).sort((a, b) => b[1] - a[1]).slice(0, 10)
 
   if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
 
@@ -544,7 +549,7 @@ function EventCountsContent({ data, config, onSetConfig }: {
 // ─── Widget: Community Posts ──────────────────────────────────────────────────
 
 function CommunityContent({ data }: { data: DashData }) {
-  const posts = data.posts.filter(p => p.post_type !== 'field_report').slice(0, 6)
+  const posts = data.posts.filter(p => p.post_type !== 'field_report').slice(0, 15)
 
   if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
   if (!posts.length) return (
@@ -586,7 +591,7 @@ function CommunityContent({ data }: { data: DashData }) {
 // ─── Widget: Field Reports ────────────────────────────────────────────────────
 
 function FieldReportsContent({ data }: { data: DashData }) {
-  const reports = data.posts.filter(p => p.post_type === 'field_report').slice(0, 6)
+  const reports = data.posts.filter(p => p.post_type === 'field_report').slice(0, 15)
 
   if (data.loading) return <div style={{ padding: '20px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--color-subtle)' }}>Loading...</div>
 
@@ -715,7 +720,7 @@ function TopGuidesContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/guides?limit=6')
+    fetch('/api/guides?limit=20')
       .then(r => r.json())
       .then(data => { setGuides(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -983,7 +988,7 @@ function SpaceWeatherContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/news?category=space_weather&limit=6')
+    fetch('/api/news?category=space_weather&limit=20')
       .then(r => r.json())
       .then(data => { setAlerts(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -1015,6 +1020,11 @@ function SpaceWeatherContent() {
               {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
             </div>
             <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+            {item.summary && (
+              <div style={{ fontSize: '11px', color: 'var(--color-muted)', lineHeight: 1.4, marginTop: '3px' }}>
+                {item.summary.length > 140 ? item.summary.slice(0, 140) + '...' : item.summary}
+              </div>
+            )}
           </a>
         )
       })}
@@ -1029,7 +1039,7 @@ function RecallsContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/news?category=recall&limit=8')
+    fetch('/api/news?category=recall&limit=20')
       .then(r => r.json())
       .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -1051,6 +1061,11 @@ function RecallsContent() {
             {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
           </div>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+          {item.summary && (
+            <div style={{ fontSize: '11px', color: 'var(--color-muted)', lineHeight: 1.4, marginTop: '3px' }}>
+              {item.summary.length > 140 ? item.summary.slice(0, 140) + '...' : item.summary}
+            </div>
+          )}
         </a>
       ))}
     </div>
@@ -1369,7 +1384,7 @@ function CisaAlertsContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/news?category=cybersecurity&limit=6')
+    fetch('/api/news?category=cybersecurity&limit=20')
       .then(r => r.json())
       .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -1391,6 +1406,11 @@ function CisaAlertsContent() {
             {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
           </div>
           <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+          {item.summary && (
+            <div style={{ fontSize: '11px', color: 'var(--color-muted)', lineHeight: 1.4, marginTop: '3px' }}>
+              {item.summary.length > 140 ? item.summary.slice(0, 140) + '...' : item.summary}
+            </div>
+          )}
         </a>
       ))}
     </div>
@@ -1404,7 +1424,7 @@ function TravelAdvisoriesContent() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/news?category=travel&limit=6')
+    fetch('/api/news?category=travel&limit=20')
       .then(r => r.json())
       .then(data => { setItems(Array.isArray(data) ? data : []); setLoading(false) })
       .catch(() => setLoading(false))
@@ -1436,6 +1456,11 @@ function TravelAdvisoriesContent() {
               {item.published_at && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>{timeAgo(item.published_at)}</span>}
             </div>
             <div style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', lineHeight: 1.3 }}>{item.title}</div>
+            {item.summary && (
+              <div style={{ fontSize: '11px', color: 'var(--color-muted)', lineHeight: 1.4, marginTop: '3px' }}>
+                {item.summary.length > 140 ? item.summary.slice(0, 140) + '...' : item.summary}
+              </div>
+            )}
           </a>
         )
       })}

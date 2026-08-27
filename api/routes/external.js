@@ -448,7 +448,7 @@ export async function externalRoutes(app) {
         return Array.from(bySite.values())
           .filter(s => s.discharge_cfs != null || s.gauge_height_ft != null)
           .sort((a, b) => (b.discharge_cfs ?? 0) - (a.discharge_cfs ?? 0))
-          .slice(0, 8)
+          .slice(0, 15)
       })
       return data
     } catch (err) {
@@ -466,7 +466,7 @@ export async function externalRoutes(app) {
           where: 'attr_PercentContained < 100',
           outFields: 'poly_IncidentName,poly_GISAcres,attr_PercentContained,attr_POOState,attr_FireDiscoveryDateTime',
           orderByFields: 'poly_GISAcres DESC',
-          resultRecordCount: '15',
+          resultRecordCount: '25',
           returnGeometry: 'false',
           f: 'json',
         })
