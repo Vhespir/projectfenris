@@ -296,6 +296,7 @@ export default function Community() {
     location_label: '',
     latitude: initLat,
     longitude: initLon,
+    shareExactLocation: false,
     incident_type: '',
     state: '',
     duration: '',
@@ -385,7 +386,22 @@ export default function Community() {
     if (!navigator.geolocation) return
     setLocating(true)
     navigator.geolocation.getCurrentPosition(
-      pos => { setForm(f => ({ ...f, latitude: pos.coords.latitude.toFixed(5), longitude: pos.coords.longitude.toFixed(5) })); setLocating(false) },
+      pos => {
+        // Rounded to ~1km (2 decimal places) by default rather than raw GPS
+        // precision (~1m at 5 decimals): this is a public, permanent post,
+        // and pinning someone's exact standing location, potentially their
+        // front door, carries real risk, especially for the civil-unrest
+        // and disaster scenarios this feature exists for. shareExactLocation
+        // is an explicit, visible opt-in for the cases where precision
+        // actually matters (a specific hazard at a specific spot).
+        const precision = form.shareExactLocation ? 5 : 2
+        setForm(f => ({
+          ...f,
+          latitude: pos.coords.latitude.toFixed(precision),
+          longitude: pos.coords.longitude.toFixed(precision),
+        }))
+        setLocating(false)
+      },
       () => setLocating(false),
       { timeout: 8000 }
     )
@@ -678,9 +694,9 @@ export default function Community() {
                 <input value={form.location_label} onChange={e => setForm(f => ({ ...f, location_label: e.target.value }))} placeholder="City, county, or region" style={inputStyle} />
               </div>
 
-              {form.post_type === 'field_report' && (
+              {(form.post_type === 'field_report' || form.post_type === 'self_reported_news') && (
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', flexWrap: 'wrap' }}>
                     <label style={{ ...labelStyle, marginBottom: 0 }}>Pin to Map (optional)</label>
                     <button type="button" onClick={handleGetLocation} disabled={locating} style={{
                       padding: '3px 10px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-mono)',
@@ -696,11 +712,29 @@ export default function Community() {
                       }}>Clear</button>
                     )}
                   </div>
+                  <div style={{ fontSize: '11px', color: 'var(--color-subtle)', marginBottom: '8px', lineHeight: 1.5 }}>
+                    Anyone can see this pin, and it doesn't go away. "Use my location" shares an approximate
+                    area (about a kilometer), not your exact spot, unless you turn on exact location below.
+                    If you're posting about something happening at home, consider using the area option or
+                    a nearby landmark instead of your precise position.
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--color-muted)', marginBottom: '8px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={form.shareExactLocation}
+                      onChange={e => setForm(f => ({ ...f, shareExactLocation: e.target.checked }))}
+                    />
+                    Share my exact location instead of an approximate area
+                  </label>
                   <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: '10px' }}>
                     <input value={form.latitude} onChange={e => setForm(f => ({ ...f, latitude: e.target.value }))} placeholder="Latitude" style={inputStyle} />
                     <input value={form.longitude} onChange={e => setForm(f => ({ ...f, longitude: e.target.value }))} placeholder="Longitude" style={inputStyle} />
                   </div>
-                  {form.latitude && <div style={{ marginTop: '5px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-accent)' }}>Will appear as a pin on the map</div>}
+                  {form.latitude && (
+                    <div style={{ marginTop: '5px', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--color-accent)' }}>
+                      Will appear as a pin on the map{form.shareExactLocation ? ' at your exact location' : ' (approximate area)'}
+                    </div>
+                  )}
                 </div>
               )}
 
