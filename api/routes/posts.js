@@ -152,7 +152,7 @@ export async function postRoutes(app, { pool }) {
     if (await checkMuted(pool, req.user.id, reply)) return
     const {
       post_type, category, title, body, location_label, latitude, longitude,
-      incident_type, state, duration, what_worked, what_failed, wish_had, key_takeaway,
+      incident_type, state, duration, what_worked, what_failed, wish_had, key_takeaway, ref,
     } = req.body ?? {}
 
     const validTypes = ['community', 'field_report', 'self_reported_news', 'aar']
@@ -230,7 +230,13 @@ export async function postRoutes(app, { pool }) {
       const mentionPattern = /@([a-zA-Z0-9_]+)/g
       const refPattern = /#([A-Z]+-[A-Z]+(?:-\d+)?)/gi
       const mentions = [...bodyText.matchAll(mentionPattern)].map(m => m[1])
-      const slugRefs = [...new Set([...bodyText.matchAll(refPattern)].map(m => m[1].toUpperCase()))]
+      // ref comes from "Post about this" on an event/news thread: the
+      // composer shows it as a chip rather than typing #SLUG into the body,
+      // so it needs to feed the same content_reference logic explicitly
+      // instead of relying on the body-text regex to find it.
+      const slugRefSet = new Set([...bodyText.matchAll(refPattern)].map(m => m[1].toUpperCase()))
+      if (ref) slugRefSet.add(String(ref).toUpperCase().trim())
+      const slugRefs = [...slugRefSet]
 
       // @mention notifications
       for (const username of [...new Set(mentions)]) {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
@@ -279,6 +279,32 @@ export default function Community() {
   const [newPostBanner, setNewPostBanner] = useState(false)
   const [subscribedChannels, setSubscribedChannels] = useState<string[]>([])
 
+  // The slug being cited shows as a removable chip with real context (what
+  // it actually is), not dumped into the body text as literal "#SLUG"
+  // characters the way it used to be. activeCite (not citeSlug directly)
+  // is what actually gets sent on submit, since the user can clear the chip
+  // and post without citing anything.
+  const [activeCite, setActiveCite] = useState(citeSlug)
+  const [citeContext, setCiteContext] = useState<{ type: string; title: string; source?: string; severity?: string; category?: string } | null>(null)
+  const [citeLoading, setCiteLoading] = useState(!!citeSlug)
+
+  const citeTitleFilledRef = useRef(false)
+  useEffect(() => {
+    if (!citeSlug) return
+    setCiteLoading(true)
+    fetch(`/api/refs/lookup?slug=${encodeURIComponent(citeSlug.toUpperCase())}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return
+        setCiteContext(data)
+        if (!citeTitleFilledRef.current) {
+          citeTitleFilledRef.current = true
+          setForm(f => f.title ? f : { ...f, title: `Re: ${data.title}` })
+        }
+      })
+      .finally(() => setCiteLoading(false))
+  }, [citeSlug])
+
   useEffect(() => {
     const saved = user?.preferences?.channels
     if (Array.isArray(saved)) setSubscribedChannels(saved as string[])
@@ -289,10 +315,14 @@ export default function Community() {
   const defaultCategory = channel.category ?? ''
 
   const [form, setForm] = useState({
-    post_type: initLat && initLon ? 'field_report' : defaultType,
+    // Citing something is almost always "here's what I'm seeing about this
+    // event," which is what Field Report is for, so that's a better
+    // starting point than whatever channel the composer happened to open
+    // from. Still just a default, the Type dropdown is right there.
+    post_type: citeSlug || (initLat && initLon) ? 'field_report' : defaultType,
     category: defaultCategory,
     title: '',
-    body: citeSlug ? `#${citeSlug} ` : '',
+    body: '',
     location_label: '',
     latitude: initLat,
     longitude: initLon,
@@ -416,7 +446,7 @@ export default function Community() {
       const res = await fetch('/api/posts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, ref: activeCite || undefined }),
       })
       const data = await res.json()
       if (!res.ok) { setFormError(data.error); return }
@@ -599,6 +629,46 @@ export default function Community() {
               <div style={{ fontFamily: 'var(--font-display)', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)' }}>
                 New post in {channel.label}
               </div>
+
+              {activeCite && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px',
+                  borderRadius: '6px', background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.25)',
+                }}>
+                  <span style={{
+                    fontSize: '10px', fontFamily: 'var(--font-mono)', padding: '2px 6px', borderRadius: '3px',
+                    background: 'rgba(34,197,94,0.15)', color: 'var(--color-accent)', textTransform: 'uppercase',
+                    letterSpacing: '0.05em', flexShrink: 0,
+                  }}>
+                    Citing
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--color-muted)' }}>
+                    {citeLoading ? (
+                      'Loading...'
+                    ) : citeContext ? (
+                      <>
+                        <span style={{ color: 'var(--color-text)', fontWeight: 500 }}>{citeContext.title}</span>
+                        {' '}
+                        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)' }}>
+                          {[citeContext.source, citeContext.severity ?? citeContext.category].filter(Boolean).join(' · ')}
+                        </span>
+                      </>
+                    ) : (
+                      <span style={{ fontFamily: 'var(--font-mono)' }}>#{activeCite}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveCite(null)}
+                    title="Post without citing this"
+                    style={{
+                      flexShrink: 0, width: '20px', height: '20px', borderRadius: '50%', border: 'none',
+                      background: 'rgba(255,255,255,0.08)', color: 'var(--color-muted)', cursor: 'pointer',
+                      fontSize: '12px', lineHeight: '20px', textAlign: 'center', padding: 0,
+                    }}
+                  >×</button>
+                </div>
+              )}
 
               {formError && (
                 <div style={{ padding: '10px 14px', borderRadius: '6px', fontSize: '13px', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: 'var(--color-danger)' }}>
