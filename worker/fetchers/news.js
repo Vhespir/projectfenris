@@ -6,10 +6,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL })
 // A handful of these feeds sit behind a WAF that specifically blocks
 // anything self-identifying as a bot. CISA and GDACS both went from a
 // blanket 403/406 to 200 in testing just by switching to a real browser UA
-// and Accept header, no other change. FEMA/PHMSA/NRC/IAEA stayed blocked
-// even with a browser UA, which points to an IP-range block instead
-// (plausible: cloud/hosting ASNs, including this app's host, are a common
-// target for that on .gov sites) rather than anything fixable here.
+// and Accept header, no other change.
 const parser = new Parser({
   timeout: 15000,
   headers: {
@@ -17,6 +14,35 @@ const parser = new Parser({
     'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, */*',
   },
 })
+
+// Some federal feeds (CISA, FEMA, DHS, PHMSA, NRC, IAEA, FBI, USDA, UN,
+// FDA) kept returning 403/404/406 from this app's actual host even with a
+// real browser UA, while the identical request succeeds from a residential
+// or unrelated-cloud IP. That's an IP-range block on their WAF, not
+// anything fixable by changing what this app sends. These route through
+// a public read-only fetch proxy instead: the request reaches CISA etc.
+// from the proxy's IP, not this app's. allorigins.win is a free,
+// unaffiliated service with no uptime guarantee; if it goes away or starts
+// rate-limiting, these feeds go back to failing and need a new proxy or a
+// different fix, not a sign the underlying feeds changed.
+const IP_BLOCKED = new Set([
+  'https://www.fema.gov/about/news-multimedia/news/feed',
+  'https://www.fema.gov/feeds/news-releases.xml',
+  'https://www.dhs.gov/news/rss.xml',
+  'https://www.cisa.gov/cybersecurity-advisories/alerts.xml',
+  'https://www.cisa.gov/cybersecurity-advisories/cybersecurity-advisories.xml',
+  'https://www.phmsa.dot.gov/news/rss.xml',
+  'https://www.nrc.gov/public-involve/listserver-subscription/news-rss.xml',
+  'https://www.iaea.org/newscenter/news/rss',
+  'https://www.fda.gov/about-fda/contact-fda/stay-informed/rss-feeds/recalls/rss.xml',
+  'https://www.fbi.gov/feeds/fbi-in-the-news/rss.xml',
+  'https://www.un.org/press/en/rss.xml',
+  'https://www.ams.usda.gov/market-news/rss',
+])
+
+function fetchUrl(url) {
+  return IP_BLOCKED.has(url) ? `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}` : url
+}
 
 // Dedicated emergency/disaster feeds, always relevant, no filtering needed
 const DEDICATED_FEEDS = [
@@ -141,7 +167,7 @@ export async function fetchNews() {
 
   for (const feed of DEDICATED_FEEDS) {
     try {
-      const result = await parser.parseURL(feed.url)
+      const result = await parser.parseURL(fetchUrl(feed.url))
       for (const item of result.items) {
         totalStored += await storeFeedItem(item, feed, true)
       }
@@ -153,7 +179,7 @@ export async function fetchNews() {
 
   for (const feed of GENERAL_FEEDS) {
     try {
-      const result = await parser.parseURL(feed.url)
+      const result = await parser.parseURL(fetchUrl(feed.url))
       for (const item of result.items) {
         totalStored += await storeFeedItem(item, feed, false)
       }

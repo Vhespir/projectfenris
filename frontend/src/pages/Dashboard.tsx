@@ -365,7 +365,19 @@ function LiveFeedContent({ data, config, onSetConfig }: {
 
 function MapAutoResize() {
   const map = useMap()
-  useEffect(() => { const t = setTimeout(() => map.invalidateSize(), 50); return () => clearTimeout(t) }, [map])
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 50)
+    // A one-time invalidateSize on mount isn't enough now that the widget
+    // itself can be resized (react-grid-layout drag-resize, or its own
+    // width provider settling a beat after first paint): Leaflet has no way
+    // to know its container changed size unless told, and without this the
+    // map keeps rendering tiles for whatever size it saw on the first
+    // frame, leaving a blank gray strip when the container ends up wider.
+    const container = map.getContainer()
+    const observer = new ResizeObserver(() => map.invalidateSize())
+    observer.observe(container)
+    return () => { clearTimeout(t); observer.disconnect() }
+  }, [map])
   return null
 }
 
@@ -1671,9 +1683,11 @@ export default function Dashboard() {
     <div>
       <style>{`
         .dash-grid .react-grid-item.react-grid-placeholder { background: var(--color-accent); opacity: 0.15; border-radius: 8px; }
-        .dash-grid .react-resizable-handle { opacity: 0.4; }
+        .dash-grid .react-resizable-handle {
+          opacity: 0.45;
+          background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 6 6'%3E%3Cpath d='M6 6H0V4.2H4V4.2H4.2V0H6V6Z' fill='%2322C55E'/%3E%3C/svg%3E");
+        }
         .dash-grid .react-resizable-handle:hover { opacity: 1; }
-        .dash-grid .react-resizable-handle::after { border-color: var(--color-accent) !important; width: 9px !important; height: 9px !important; }
       `}</style>
       <div style={{ borderBottom: '1px solid var(--color-border)', background: 'var(--color-bg)' }}>
         <div style={{ maxWidth: '1280px', margin: '0 auto', padding: isMobile ? '16px' : '20px 24px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
@@ -1731,7 +1745,7 @@ export default function Dashboard() {
       {editMode && !isMobile && (
         <div style={{ background: 'rgba(34,197,94,0.08)', borderBottom: '1px solid rgba(34,197,94,0.2)', padding: '6px 24px', textAlign: 'center' }}>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'rgba(34,197,94,0.8)', letterSpacing: '0.08em' }}>
-            Drag the ⠿ handle to move a panel anywhere. Drag the bottom-right corner to resize it.
+            Drag the ⠿ handle to move a panel anywhere. Drag any corner to resize it.
           </span>
         </div>
       )}
@@ -1765,6 +1779,7 @@ export default function Dashboard() {
             containerPadding={[0, 0]}
             isDraggable={editMode && !isMobile}
             isResizable={editMode && !isMobile}
+            resizeHandles={['se', 'sw', 'ne', 'nw']}
             draggableHandle=".dash-drag-handle"
             compactType="vertical"
             useCSSTransforms
