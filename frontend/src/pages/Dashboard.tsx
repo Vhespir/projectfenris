@@ -126,6 +126,16 @@ function eventCentroid(geom: DisasterEvent['geometry']): [number, number] | null
   ]
 }
 
+function milesBetween(a: [number, number], b: [number, number]): number {
+  const R = 3958.8 // Earth radius in miles
+  const [lat1, lon1] = a, [lat2, lon2] = b
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLon = (lon2 - lon1) * Math.PI / 180
+  const s = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s))
+}
+
 // ─── Map helpers ──────────────────────────────────────────────────────────────
 
 function GeolocateUser() {
@@ -216,17 +226,22 @@ function LiveFeedContent({ data, config, onSetConfig }: {
 }) {
   const { open: openDrawer } = useContextDrawer()
   const navigate = useNavigate()
+  const { user } = useAuth()
   // A fixed 10 regardless of how tall the widget was made meant enlarging it
   // just added blank space below the same 10 rows. Show up to 20 instead so
   // a taller widget actually has more to show; the panel's own scroll
   // handles it when there's more than fits.
   const DISPLAY_LIMIT = 20
+  const NEAR_ME_RADIUS_MI = 150
 
   const showEvents = config?.showEvents !== false
   const showNews   = config?.showNews   !== false
   const showPosts  = config?.showPosts  !== false
   const severeOnly = config?.severeOnly !== false
+  const nearMeOnly = config?.nearMeOnly === true
   const configOpen = config?._open === true
+  const userLoc: [number, number] | null =
+    user?.user_lat != null && user?.user_lon != null ? [user.user_lat, user.user_lon] : null
 
   const rows = useMemo<LiveFeedRow[]>(() => {
     const out: LiveFeedRow[] = []
@@ -267,11 +282,18 @@ function LiveFeedContent({ data, config, onSetConfig }: {
           badge: POST_TYPE_LABEL[p.post_type] ?? p.post_type,
           color: POST_TYPE_COLOR[p.post_type] ?? '#71717A',
           timeIso: p.created_at, postId: p.id,
+          centroid: p.latitude != null && p.longitude != null ? [p.latitude, p.longitude] : null,
         })
       }
     }
-    return out.sort((a, b) => new Date(b.timeIso ?? 0).getTime() - new Date(a.timeIso ?? 0).getTime())
-  }, [data, showEvents, showNews, showPosts, severeOnly])
+    // News items generally have no coordinates (region is free text, not a
+    // point), so "near me" naturally excludes them rather than guessing.
+    // Anything without a centroid also drops out, same reasoning.
+    const filtered = nearMeOnly && userLoc
+      ? out.filter(r => r.centroid && milesBetween(userLoc, r.centroid) <= NEAR_ME_RADIUS_MI)
+      : out
+    return filtered.sort((a, b) => new Date(b.timeIso ?? 0).getTime() - new Date(a.timeIso ?? 0).getTime())
+  }, [data, showEvents, showNews, showPosts, severeOnly, nearMeOnly, userLoc])
 
   const configPanel = configOpen && onSetConfig ? (
     <div style={{ padding: '12px 14px', background: 'var(--color-surface)', borderTop: '1px solid var(--color-border)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -300,6 +322,17 @@ function LiveFeedContent({ data, config, onSetConfig }: {
           {severeOnly ? '✓ ' : ''}Severe/Extreme events only
         </button>
       )}
+      <button
+        onClick={() => userLoc && onSetConfig({ nearMeOnly: !nearMeOnly })}
+        disabled={!userLoc}
+        title={userLoc ? undefined : 'Set your region under Settings to use Near Me'}
+        style={{ alignSelf: 'flex-start', padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontFamily: 'var(--font-display)',
+          cursor: userLoc ? 'pointer' : 'not-allowed',
+          border: `1px solid ${nearMeOnly ? 'var(--color-accent)' : 'var(--color-border)'}`,
+          background: nearMeOnly ? 'rgba(34,197,94,0.1)' : 'transparent',
+          color: !userLoc ? 'var(--color-subtle)' : nearMeOnly ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+        {nearMeOnly ? '✓ ' : ''}Near me only ({NEAR_ME_RADIUS_MI}mi){userLoc ? '' : ', set your region first'}
+      </button>
     </div>
   ) : null
 
