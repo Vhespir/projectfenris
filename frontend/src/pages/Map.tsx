@@ -101,6 +101,8 @@ export default function MapPage() {
 
   const flyToRef = useRef<((lat: number, lon: number) => void) | null>(null)
   const searchBoxRef = useRef<HTMLDivElement | null>(null)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const searchSeqRef = useRef(0)
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
@@ -110,26 +112,52 @@ export default function MapPage() {
     return () => document.removeEventListener('mousedown', onClickOutside)
   }, [])
 
-  async function runSearch(e?: React.FormEvent) {
-    e?.preventDefault()
-    const q = searchQuery.trim()
-    if (!q) return
+  async function doSearch(q: string) {
+    searchAbortRef.current?.abort()
+    const controller = new AbortController()
+    searchAbortRef.current = controller
+    const seq = ++searchSeqRef.current
+
     setSearching(true)
     try {
-      const res = await fetch(`/api/external/geocode?q=${encodeURIComponent(q)}`)
+      const res = await fetch(`/api/external/geocode?q=${encodeURIComponent(q)}`, { signal: controller.signal })
       const data = await res.json()
+      if (seq !== searchSeqRef.current) return // a newer keystroke already superseded this request
       const results = Array.isArray(data) ? data : []
       setSearchResults(results)
       setSearchOpen(true)
-      // Only one plausible match (or the user already picked from a list and
-      // is hitting Enter again): just fly there instead of making them click.
-      if (results.length === 1) {
-        flyToRef.current?.(results[0].lat, results[0].lon)
-        setSearchOpen(false)
-      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError' && seq === searchSeqRef.current) setSearchResults([])
     } finally {
-      setSearching(false)
+      if (seq === searchSeqRef.current) setSearching(false)
     }
+  }
+
+  // Live suggestions as you type, debounced so every keystroke doesn't fire
+  // a request (the geocode endpoint is rate-limited to 20/min per IP, and
+  // there's no reason to hit Nominatim harder than a person actually types).
+  useEffect(() => {
+    const q = searchQuery.trim()
+    if (q.length < 3) {
+      setSearchResults([])
+      setSearchOpen(false)
+      return
+    }
+    const t = setTimeout(() => doSearch(q), 350)
+    return () => clearTimeout(t)
+  }, [searchQuery])
+
+  async function runSearch(e?: React.FormEvent) {
+    e?.preventDefault()
+    // Enter/Go while a suggestion list is already showing: go to the top
+    // match instead of re-querying for what's already on screen.
+    if (searchOpen && searchResults.length > 0) {
+      selectSearchResult(searchResults[0])
+      return
+    }
+    const q = searchQuery.trim()
+    if (!q) return
+    await doSearch(q)
   }
 
   function selectSearchResult(r: { lat: number; lon: number }) {
