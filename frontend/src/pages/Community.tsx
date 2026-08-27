@@ -315,22 +315,17 @@ export default function Community() {
   const defaultCategory = channel.category ?? ''
 
   const [form, setForm] = useState({
-    // initLat/initLon comes from an actual "report from here" action (a map
-    // right-click, "use my location"), which really does mean firsthand
-    // ground presence, so Field Report fits there. Citing a thread does
-    // NOT mean that: "Post about this" shows up on every event, including
-    // ones nowhere near the person clicking it (a flood on the other side
-    // of the planet), so defaulting to Field Report there would falsely
-    // claim firsthand presence. Citing keeps whatever the channel's own
-    // default type is instead.
-    post_type: (initLat && initLon) ? 'field_report' : defaultType,
-    // A citation is a reaction to a specific event, not a topic post, and
-    // none of the community categories (Gear, Food, Medical...) actually
-    // fit that. General Discussion is the least-wrong bucket, so citing
-    // defaults there instead of leaving the category blank and making
-    // someone pick an unrelated topic just to say something about a flood
-    // warning.
-    category: citeSlug ? 'General Discussion' : defaultCategory,
+    // Each type has one clear job now: Field Report is strictly firsthand
+    // ("I'm seeing this right now"), which is genuinely true for
+    // initLat/initLon (an actual "report from here" action, a map
+    // right-click or "use my location"). Citing a thread is different:
+    // "Post about this" appears on every event, including ones nowhere
+    // near whoever clicked it, so it's News Report instead, "about a
+    // specific thing" without claiming ground presence, and it needs no
+    // category (see below), which also sidesteps having to force a
+    // flood-warning reaction into an unrelated Gear/Food/Medical bucket.
+    post_type: (initLat && initLon) ? 'field_report' : citeSlug ? 'self_reported_news' : defaultType,
+    category: defaultCategory,
     title: '',
     body: '',
     location_label: '',
