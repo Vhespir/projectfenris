@@ -1,5 +1,23 @@
+import { randomUUID } from 'node:crypto'
 import { emitToChannel, emitToUser } from '../lib/socket.js'
 import { checkMuted } from '../lib/moderation.js'
+import { processPhoto, processVideo } from '../lib/media.js'
+import { uploadToR2, deleteFromR2, keyFromUrl, storageConfigured } from '../lib/storage.js'
+
+const MAX_MEDIA_PER_POST = 4
+const PHOTO_MAX_BYTES = 15 * 1024 * 1024
+const VIDEO_MAX_BYTES = 200 * 1024 * 1024
+
+const MEDIA_JSON_SUBQUERY = `
+  COALESCE((
+    SELECT json_agg(json_build_object(
+      'id', pm.id, 'media_type', pm.media_type, 'url', pm.url,
+      'thumbnail_url', pm.thumbnail_url, 'width', pm.width, 'height', pm.height,
+      'duration_seconds', pm.duration_seconds
+    ) ORDER BY pm.position)
+    FROM post_media pm WHERE pm.post_id = p.id
+  ), '[]') AS media
+`
 
 const CATEGORY_TO_CHANNEL = {
   'Gear and Equipment': 'gear',
@@ -44,7 +62,8 @@ export async function postRoutes(app, { pool }) {
              p.incident_type, p.state, p.duration, p.key_takeaway,
              p.upvote_count, p.downvote_count, p.created_at, p.updated_at,
              u.username, u.reputation, u.is_trusted,
-             (u.id <= 100) AS is_founding_member
+             (u.id <= 100) AS is_founding_member,
+             ${MEDIA_JSON_SUBQUERY}
       FROM posts p
       LEFT JOIN users u ON u.id = p.user_id
       WHERE p.is_removed = FALSE
@@ -106,7 +125,8 @@ export async function postRoutes(app, { pool }) {
              p.what_worked, p.what_failed, p.wish_had, p.key_takeaway,
              p.upvote_count, p.downvote_count, p.created_at, p.updated_at,
              u.id AS user_id, u.username, u.reputation, u.is_trusted,
-             (u.id <= 100) AS is_founding_member
+             (u.id <= 100) AS is_founding_member,
+             ${MEDIA_JSON_SUBQUERY}
       FROM posts p
       LEFT JOIN users u ON u.id = p.user_id
       WHERE p.id = $1 AND p.is_removed = FALSE
@@ -254,6 +274,121 @@ export async function postRoutes(app, { pool }) {
     }).catch(() => {})
 
     return reply.code(201).send(rows[0])
+  })
+
+  // Attach photos/videos to a post (author only). Separate from post
+  // creation so the composer can create the text post first and stream
+  // media up after, and so media can be added to a post later too.
+  app.post('/posts/:id/media', {
+    preHandler: [app.authenticate],
+    config: { rateLimit: { max: 20, timeWindow: '1 hour' } },
+  }, async (req, reply) => {
+    if (!storageConfigured()) {
+      return reply.code(503).send({ error: 'Media uploads are not configured on this server yet' })
+    }
+    const postId = Number(req.params.id)
+    const { rows: postRows } = await pool.query('SELECT user_id FROM posts WHERE id = $1 AND is_removed = FALSE', [postId])
+    if (!postRows.length) return reply.code(404).send({ error: 'Post not found' })
+    if (postRows[0].user_id !== req.user.id) return reply.code(403).send({ error: 'Forbidden' })
+
+    const { rows: countRows } = await pool.query(
+      'SELECT COUNT(*)::int AS n, COALESCE(MAX(position), -1) AS max_pos FROM post_media WHERE post_id = $1',
+      [postId]
+    )
+    let position = countRows[0].max_pos + 1
+    let remaining = MAX_MEDIA_PER_POST - countRows[0].n
+    if (remaining <= 0) {
+      return reply.code(400).send({ error: `A post can have at most ${MAX_MEDIA_PER_POST} attachments` })
+    }
+
+    const inserted = []
+    const skipped = []
+    const parts = req.files({ limits: { fileSize: VIDEO_MAX_BYTES, files: remaining } })
+
+    for await (const part of parts) {
+      if (remaining <= 0) break
+      const isVideo = part.mimetype.startsWith('video/')
+      const isPhoto = part.mimetype.startsWith('image/')
+      if (!isVideo && !isPhoto) {
+        part.file.resume()
+        skipped.push({ filename: part.filename, reason: 'Unsupported file type' })
+        continue
+      }
+
+      const chunks = []
+      for await (const chunk of part.file) chunks.push(chunk)
+      const raw = Buffer.concat(chunks)
+
+      if (part.file.truncated) {
+        skipped.push({ filename: part.filename, reason: 'File too large' })
+        continue
+      }
+      if (isPhoto && raw.length > PHOTO_MAX_BYTES) {
+        skipped.push({ filename: part.filename, reason: 'Photo exceeds the 15MB limit' })
+        continue
+      }
+
+      try {
+        const processed = isVideo ? await processVideo(raw) : await processPhoto(raw)
+        const id = randomUUID()
+        const ext = isVideo ? 'mp4' : 'jpg'
+        const url = await uploadToR2(`posts/${postId}/${id}.${ext}`, processed.buffer, isVideo ? 'video/mp4' : 'image/jpeg')
+        const thumbnailUrl = processed.thumbnail
+          ? await uploadToR2(`posts/${postId}/${id}-thumb.jpg`, processed.thumbnail, 'image/jpeg')
+          : null
+
+        const { rows: mediaRows } = await pool.query(`
+          INSERT INTO post_media (post_id, media_type, url, thumbnail_url, width, height, duration_seconds, bytes, position)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+          RETURNING id, media_type, url, thumbnail_url, width, height, duration_seconds
+        `, [
+          postId, isVideo ? 'video' : 'photo', url, thumbnailUrl,
+          processed.width, processed.height, processed.durationSeconds ?? null,
+          processed.buffer.length, position,
+        ])
+        inserted.push(mediaRows[0])
+        position++
+        remaining--
+      } catch (err) {
+        req.log.error(err, 'media processing failed')
+        skipped.push({ filename: part.filename, reason: 'Could not process this file' })
+      }
+    }
+
+    if (!inserted.length) {
+      return reply.code(400).send({ error: 'No valid media was uploaded', skipped })
+    }
+    return reply.code(201).send({ media: inserted, skipped })
+  })
+
+  // Remove one media attachment (author or moderator)
+  app.delete('/posts/:id/media/:mediaId', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const postId = Number(req.params.id)
+    const mediaId = Number(req.params.mediaId)
+    const { rows: postRows } = await pool.query(`
+      SELECT p.user_id, u.is_moderator
+      FROM posts p LEFT JOIN users u ON u.id = $2
+      WHERE p.id = $1
+    `, [postId, req.user.id])
+    if (!postRows.length) return reply.code(404).send({ error: 'Post not found' })
+    if (postRows[0].user_id !== req.user.id && !postRows[0].is_moderator) {
+      return reply.code(403).send({ error: 'Forbidden' })
+    }
+
+    const { rows: mediaRows } = await pool.query(
+      'DELETE FROM post_media WHERE id = $1 AND post_id = $2 RETURNING url, thumbnail_url',
+      [mediaId, postId]
+    )
+    if (!mediaRows.length) return reply.code(404).send({ error: 'Media not found' })
+
+    const { url, thumbnail_url } = mediaRows[0]
+    Promise.resolve().then(async () => {
+      for (const u of [url, thumbnail_url]) {
+        const key = u && keyFromUrl(u)
+        if (key) await deleteFromR2(key).catch(() => {})
+      }
+    })
+    return reply.code(204).send()
   })
 
   // Edit post (author only)

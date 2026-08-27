@@ -15,7 +15,7 @@ const OVERLAYS = [
   { key: 'alerts',  label: 'Weather Alerts' },
   { key: 'traffic', label: 'Air Traffic' },
   { key: 'fires',   label: 'Fires' },
-  { key: 'reports', label: 'Field Reports' },
+  { key: 'reports', label: 'Citizen Reports' },
 ]
 
 const FIRE_RANGES: { key: FireTimeRange; label: string; desc: string }[] = [
@@ -46,6 +46,7 @@ const LEGEND_SOURCES = [
   { shape: 'pentagon', color: '#3B82F6', label: 'GDACS Global' },
   { shape: 'diamond',  color: '#A78BFA', label: 'EPA Air Quality' },
   { shape: 'square',   color: '#F59E0B', label: 'Field Report' },
+  { shape: 'square',   color: '#38BDF8', label: 'Self-Reported News' },
 ]
 
 const LEGEND_SEVERITY = [

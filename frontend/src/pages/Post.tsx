@@ -5,6 +5,16 @@ import { getTier } from '../utils/tier'
 import { PostBody } from '../components/PostBody'
 import { MentionTextarea } from '../components/MentionTextarea'
 
+interface PostMedia {
+  id: number
+  media_type: 'photo' | 'video'
+  url: string
+  thumbnail_url: string | null
+  width: number | null
+  height: number | null
+  duration_seconds: number | null
+}
+
 interface Post {
   id: number
   post_type: string
@@ -29,6 +39,7 @@ interface Post {
   username: string | null
   reputation: number
   is_founding_member?: boolean
+  media?: PostMedia[]
 }
 
 interface Comment {
@@ -167,6 +178,12 @@ export default function PostPage() {
     if (res.ok) navigate('/community')
   }
 
+  async function handleDeleteMedia(mediaId: number) {
+    if (!confirm('Remove this photo/video?')) return
+    const res = await fetch(`/api/posts/${id}/media/${mediaId}`, { method: 'DELETE' })
+    if (res.ok) setPost(p => p ? { ...p, media: p.media?.filter(m => m.id !== mediaId) } : p)
+  }
+
   async function handleRemoveComment(commentId: number) {
     if (!confirm('Remove this comment?')) return
     const res = await fetch(`/api/comments/${commentId}`, { method: 'DELETE' })
@@ -278,6 +295,33 @@ export default function PostPage() {
             <div style={{ marginBottom: '24px' }}>
               <PostBody text={post.body} />
             </div>
+
+            {Array.isArray(post.media) && post.media.length > 0 && (
+              <div style={{
+                display: 'grid', gap: '8px', marginBottom: '24px',
+                gridTemplateColumns: post.media.length === 1 ? '1fr' : 'repeat(2, 1fr)',
+              }}>
+                {post.media.map(m => (
+                  <div key={m.id} style={{ position: 'relative', borderRadius: '8px', overflow: 'hidden', background: '#000' }}>
+                    {m.media_type === 'video' ? (
+                      <video src={m.url} poster={m.thumbnail_url ?? undefined} controls style={{ width: '100%', maxHeight: '480px', display: 'block' }} />
+                    ) : (
+                      <img src={m.url} style={{ width: '100%', maxHeight: '480px', objectFit: 'contain', display: 'block' }} />
+                    )}
+                    {user?.id === post.user_id && (
+                      <button
+                        onClick={() => handleDeleteMedia(m.id)}
+                        style={{
+                          position: 'absolute', top: '8px', right: '8px', padding: '4px 9px', borderRadius: '5px',
+                          border: 'none', background: 'rgba(0,0,0,0.65)', color: '#FFF',
+                          fontSize: '11px', fontFamily: 'var(--font-mono)', cursor: 'pointer',
+                        }}
+                      >Remove</button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {post.post_type === 'aar' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>

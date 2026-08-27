@@ -31,6 +31,11 @@ services:
       EIA_API_KEY: ${EIA_API_KEY}
       BLS_API_KEY: ${BLS_API_KEY}
       FRED_API_KEY: ${FRED_API_KEY}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY}
+      R2_BUCKET_NAME: ${R2_BUCKET_NAME}
+      R2_PUBLIC_URL: ${R2_PUBLIC_URL}
     volumes:
       - uploads-data:/app/uploads
     depends_on:
@@ -78,9 +83,9 @@ services:
     networks:
       - fenris-network
 
-  # Local nightly pg_dump, kept 14 days, pruned automatically. Local-disk only --
-  # protects against a bad deploy / volume mixup, not against losing the VPS
-  # itself. See backup/backup.sh for the off-site (B2) follow-up note.
+  # Local nightly pg_dump, kept 14 days, pruned automatically. Local-disk only,
+  # so this protects against a bad deploy / volume mixup, not against losing
+  # the VPS itself. See backup/backup.sh for the off-site (B2) follow-up note.
   backup:
     build:
       context: ./backup
