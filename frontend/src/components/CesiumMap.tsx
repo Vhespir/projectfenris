@@ -5,7 +5,7 @@ import {
   WebMapServiceImageryProvider, GeoJsonDataSource, CustomDataSource,
   ColorMaterialProperty, ConstantProperty, ScreenSpaceEventType,
   JulianDate, Credit, HeightReference, defined, Entity, Cartesian2,
-  Ion, createWorldTerrainAsync, BoundingSphere, HeadingPitchRange,
+  Ion, createWorldTerrainAsync,
 } from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { DisasterEvent, AirTrafficFilters, FireTimeRange } from './MapEventLayer'
@@ -97,50 +97,6 @@ function bearingDeg(lat1: number, lon1: number, lat2: number, lon2: number): num
   const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180
   const Δλ = (lon2 - lon1) * Math.PI / 180
   return (Math.atan2(Math.sin(Δλ) * Math.cos(φ2), Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ)) * 180 / Math.PI + 360) % 360
-}
-
-function clusterBadgeUrl(count: number): string {
-  const label = count >= 1000 ? `${Math.floor(count / 1000)}k` : String(count)
-  const [bg, ring] = count >= 50
-    ? ['#EF4444', 'rgba(239,68,68,0.28)']
-    : count >= 10
-      ? ['#F59E0B', 'rgba(245,158,11,0.28)']
-      : ['#22C55E', 'rgba(34,197,94,0.28)']
-  const size = count >= 100 ? 46 : count >= 50 ? 42 : count >= 10 ? 38 : 32
-  const fs = label.length > 2 ? 11 : 13
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 40 40">
-    <circle cx="20" cy="20" r="19" fill="${ring}"/>
-    <circle cx="20" cy="20" r="15" fill="${bg}" fill-opacity="0.92" stroke="#0A0A0A" stroke-width="1.5"/>
-    <text x="20" y="20" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-weight="700" font-size="${fs}" fill="#FFFFFF">${label}</text>
-  </svg>`
-  return 'data:image/svg+xml;base64,' + btoa(svg)
-}
-
-function setupClustering(ds: CustomDataSource, pixelRange = 60) {
-  ds.clustering.enabled = true
-  ds.clustering.pixelRange = pixelRange
-  ds.clustering.minimumClusterSize = 2
-  ds.clustering.clusterEvent.addEventListener((entities: Entity[], cluster: unknown) => {
-    const c = cluster as {
-      billboard: { id: unknown; show: boolean; image: string; width: number; height: number; disableDepthTestDistance: number }
-      label: { show: boolean }
-      point: { show: boolean }
-    }
-    const n = entities.length
-    const sz = n >= 100 ? 46 : n >= 50 ? 42 : n >= 10 ? 38 : 32
-    c.label.show = false
-    c.point.show = false
-    c.billboard.show = true
-    c.billboard.image = clusterBadgeUrl(n)
-    c.billboard.width = sz
-    c.billboard.height = sz
-    c.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY
-    // Cesium only puts the clustered entities array on cluster.label.id,
-    // never on the billboard, but the badge is the billboard (the label
-    // is hidden above). Without this, picking the visible badge returns
-    // no id at all and the click handler's cluster branch never fires.
-    c.billboard.id = entities
-  })
 }
 
 function passesAtFilter(s: unknown[], filters: AirTrafficFilters): boolean {
@@ -318,48 +274,6 @@ export default function CesiumMap({
           return
         }
       }
-      // Cesium's clustering renders a badge for the group but does nothing
-      // when you click it, the clustered entities live on picked.id as an
-      // array, not a single Entity, so the branch above never catches it.
-      // Zoom into the cluster's bounding sphere instead, same as clicking a
-      // cluster on a normal map does.
-      if (defined(picked) && Array.isArray(picked.id)) {
-        const clustered = picked.id as Entity[]
-        const positions = clustered
-          .map(e => e.position?.getValue(JulianDate.now()))
-          .filter((p): p is Cartesian3 => !!p)
-        if (positions.length > 0) {
-          const sphere = BoundingSphere.fromPoints(positions)
-          viewer.camera.flyToBoundingSphere(sphere, {
-            duration: 1,
-            offset: new HeadingPitchRange(0, -Math.PI / 2, Math.max(sphere.radius * 3, 50000)),
-          })
-        }
-        // Zooming in isn't enough on its own: tightly-packed points can
-        // still read as one cluster at the new zoom level, so clicking felt
-        // like it did nothing. Show what's actually in the cluster right
-        // away by stacking each entity's own popup content in the sidebar.
-        const items = clustered
-          .map(e => e.description?.getValue(JulianDate.now()) as string | undefined)
-          .filter((html): html is string => !!html)
-        if (items.length > 0) {
-          setSidebar({
-            html: `
-              <div style="font-family:'Space Grotesk',sans-serif;min-width:220px">
-                <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#71717A;margin-bottom:10px">
-                  ${items.length} items in this cluster
-                </div>
-                <div style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto">
-                  ${items.map(html => `<div style="border-top:1px solid #262626;padding-top:10px">${html}</div>`).join('')}
-                </div>
-              </div>
-            `,
-          })
-        } else {
-          setSidebar(null)
-        }
-        return
-      }
       setSidebar(null)
     }, ScreenSpaceEventType.LEFT_CLICK)
 
@@ -467,7 +381,6 @@ export default function CesiumMap({
 
     if (!eventsSourceRef.current) {
       eventsSourceRef.current = new CustomDataSource('events')
-      setupClustering(eventsSourceRef.current, 60)
       viewer.dataSources.add(eventsSourceRef.current)
     }
     eventsSourceRef.current.entities.removeAll()
@@ -740,7 +653,6 @@ export default function CesiumMap({
 
     if (!reportsSourceRef.current) {
       reportsSourceRef.current = new CustomDataSource('citizen-reports')
-      setupClustering(reportsSourceRef.current, 50)
       viewer.dataSources.add(reportsSourceRef.current)
     }
 
@@ -926,7 +838,6 @@ export default function CesiumMap({
 
     if (!atSourceRef.current) {
       atSourceRef.current = new CustomDataSource('air-traffic')
-      setupClustering(atSourceRef.current, 35)
       viewer.dataSources.add(atSourceRef.current)
     }
 
