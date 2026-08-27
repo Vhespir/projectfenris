@@ -413,8 +413,8 @@ export async function externalRoutes(app) {
         const json = await res.json()
         const series = json?.value?.timeSeries ?? []
 
-        // Each site shows up as two separate series (discharge, gauge height) --
-        // fold them back together by site code.
+        // Each site shows up as two separate series (discharge, gauge height),
+        // so fold them back together by site code.
         const bySite = new Map()
         for (const ts of series) {
           const siteCode = ts.sourceInfo?.siteCode?.[0]?.value
@@ -442,7 +442,7 @@ export async function externalRoutes(app) {
           site.updated_at = latest.dateTime ?? site.updated_at
         }
 
-        // Sort by discharge descending -- on any given state this naturally
+        // Sort by discharge descending: on any given state this naturally
         // surfaces the major rivers over small creeks, since there's no
         // flood-stage threshold available without a second, per-site API call.
         return Array.from(bySite.values())
@@ -488,6 +488,35 @@ export async function externalRoutes(app) {
       return data
     } catch (err) {
       reply.code(503).send({ error: 'wildfires unavailable', detail: err.message })
+    }
+  })
+
+  // ── Location search (for "fly to" on the map) ──────────────────────────────
+  // Proxied through here rather than called from the browser directly:
+  // Nominatim's usage policy asks for an identifying User-Agent, which
+  // browser fetch() can't set (the browser controls that header), so a
+  // direct client-side call would show up as generic browser traffic
+  // instead. Routing it through the API, which already sends a proper UA
+  // for the profile-region geocoder below, keeps this compliant.
+  app.get('/external/geocode', {
+    config: { rateLimit: { max: 20, timeWindow: '1 minute' } },
+  }, async (req, reply) => {
+    const q = String(req.query?.q ?? '').trim()
+    if (!q) return []
+    try {
+      const params = new URLSearchParams({ q, format: 'json', limit: '5' })
+      const res = await fetch(`https://nominatim.openstreetmap.org/search?${params}`, {
+        headers: H, signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) throw new Error(`Nominatim ${res.status}`)
+      const results = await res.json()
+      return results.map(r => ({
+        label: r.display_name,
+        lat: parseFloat(r.lat),
+        lon: parseFloat(r.lon),
+      })).filter(r => !isNaN(r.lat) && !isNaN(r.lon))
+    } catch (err) {
+      reply.code(503).send({ error: 'geocode unavailable', detail: err.message })
     }
   })
 }

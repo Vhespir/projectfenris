@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Viewer, Cartesian3, Color, ImageryLayer, UrlTemplateImageryProvider,
-  WebMapServiceImageryProvider, WebMercatorTilingScheme, GeoJsonDataSource, CustomDataSource,
+  WebMapServiceImageryProvider, GeoJsonDataSource, CustomDataSource,
   ColorMaterialProperty, ConstantProperty, ScreenSpaceEventType,
   JulianDate, Credit, HeightReference, defined, Entity, Cartesian2,
   Ion, createWorldTerrainAsync, BoundingSphere, HeadingPitchRange,
@@ -208,7 +208,6 @@ export default function CesiumMap({
   const atSourceRef = useRef<CustomDataSource | null>(null)
   const firmsLayerRef = useRef<ImageryLayer | null>(null)
   const satelliteLayerRef = useRef<ImageryLayer | null>(null)
-  const hiresSatelliteLayerRef = useRef<ImageryLayer | null>(null)
   const reportsSourceRef = useRef<CustomDataSource | null>(null)
 
   const atStatesRef = useRef<unknown[][]>([])
@@ -235,20 +234,28 @@ export default function CesiumMap({
       navigationInstructionsInitiallyVisible: false,
     })
 
-    // CARTO's dark_all tiles now require an API key on every mirror
-    // (returns a watermark image instead of map data otherwise).
-    // VITE_CARTO_API_KEY is a build-time value baked into the bundle, same
-    // as the Cesium ion token above: tile requests go straight from the
-    // browser to CARTO either way, so there's nothing gained by hiding it.
+    // Default base map: Esri World Imagery (free, no key, seamless
+    // high-resolution satellite/aerial imagery, verified by fetching real
+    // tiles over Washington DC at zoom 17-19 where individual people and
+    // parked cars are visible) plus a transparent reference layer of
+    // borders, coastlines, and place labels on top, since raw satellite
+    // imagery alone has no country/city names on it.
     viewer.imageryLayers.removeAll()
     viewer.imageryLayers.add(
       new ImageryLayer(
         new UrlTemplateImageryProvider({
-          url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png?key=${import.meta.env.VITE_CARTO_API_KEY}`,
-          subdomains: ['a', 'b', 'c', 'd'],
-          tilingScheme: new WebMercatorTilingScheme(),
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
           maximumLevel: 19,
-          credit: new Credit('© OpenStreetMap contributors © CARTO'),
+          credit: new Credit('© Esri, Maxar, Earthstar Geographics, and the GIS user community'),
+        })
+      )
+    )
+    viewer.imageryLayers.add(
+      new ImageryLayer(
+        new UrlTemplateImageryProvider({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 19,
+          credit: new Credit('© Esri'),
         })
       )
     )
@@ -541,7 +548,14 @@ export default function CesiumMap({
         const layer = new ImageryLayer(
           new UrlTemplateImageryProvider({
             url: `https://tilecache.rainviewer.com${path}/256/{z}/{x}/{y}/6/1_0.png`,
-            maximumLevel: 12,
+            // RainViewer's real cap is 7, not the 12 this had before: past
+            // that it doesn't serve blurrier tiles, it serves a literal
+            // "Zoom Level Not Supported" placeholder image baked into the
+            // tile itself, confirmed by fetching raw tiles directly at
+            // z=7 through 18 (7 is the last one that isn't the same
+            // placeholder every time). Capping here lets Cesium upsample
+            // the deepest real tile when zooming further instead.
+            maximumLevel: 7,
             credit: new Credit('RainViewer'),
           })
         )
@@ -711,27 +725,24 @@ export default function CesiumMap({
     }
   }, [firesActive, fireRange])
 
-  // ── NASA GIBS true-color satellite layer (daily, global, cloud cover) ───────
-  // Free, no key, updated daily. GIBS processes each day's mosaic with a lag,
-  // so "today" 404s for at least the first several hours; yesterday's date
-  // is the latest that's reliably available. GoogleMapsCompatible_Level9
-  // caps out at zoom 9 (~305m/pixel), which is what this actually is: a
-  // same-day view of the whole planet including today's cloud cover, not a
-  // close-up basemap. See hiresSatelliteActive below for that.
-  //
-  // The dark wedge-shaped gaps visible in this layer are real: MODIS Terra
-  // is a single polar-orbiting satellite, and a single day's pass doesn't
-  // fully cover every longitude, especially near the equator. Confirmed by
-  // pulling the raw tiles directly (no Cesium involved) across a week of
-  // different dates, same gaps every time, not a rendering bug and not
-  // something a projection/tiling fix can close. NASA's own Worldview
-  // viewer shows the identical gaps for the same reason.
-  const satelliteActive = activeOverlays.has('satellite_daily')
+  // ── Live satellite (GOES-East + GOES-West GeoColor) ─────────────────────────
+  // The old daily-MODIS layer here got removed: real gaps (see git history),
+  // and only ever "yesterday", not actually live. GOES-East/West are
+  // geostationary (fixed viewpoint, continuous full-disk coverage, no
+  // orbital gaps) and GIBS updates each one every 10 minutes. Requesting
+  // time "default" always resolves to whatever the latest available scan
+  // is, confirmed against GIBS's own capabilities document. GeoColor is
+  // NOAA's true-color-by-day / IR-plus-city-lights-by-night composite, so
+  // it looks right around the clock instead of going black at night.
+  // Coverage is the Americas and both oceans on either side, not the whole
+  // globe: there's no equivalent Meteosat/Himawari composite in GIBS to
+  // cover Europe/Africa/Asia, so this is honestly labeled accordingly.
+  const liveSatelliteActive = activeOverlays.has('satellite_live')
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
 
-    if (!satelliteActive) {
+    if (!liveSatelliteActive) {
       if (satelliteLayerRef.current) {
         viewer.imageryLayers.remove(satelliteLayerRef.current)
         satelliteLayerRef.current = null
@@ -739,61 +750,34 @@ export default function CesiumMap({
       return
     }
 
-    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
-    const layer = new ImageryLayer(
+    const goesEast = new ImageryLayer(
       new UrlTemplateImageryProvider({
-        url: `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${yesterday}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
-        maximumLevel: 9,
-        credit: new Credit('NASA EOSDIS GIBS / MODIS Terra'),
+        url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-East_ABI_GeoColor/default/default/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png',
+        maximumLevel: 7,
+        credit: new Credit('NOAA / NASA EOSDIS GIBS / GOES-East'),
       })
     )
-    viewer.imageryLayers.add(layer)
-    satelliteLayerRef.current = layer
-
-    return () => {
-      if (satelliteLayerRef.current && viewerRef.current) {
-        viewerRef.current.imageryLayers.remove(satelliteLayerRef.current)
-        satelliteLayerRef.current = null
-      }
-    }
-  }, [satelliteActive])
-
-  // ── Esri World Imagery (close-up satellite/aerial, Google Earth-style) ──────
-  // Free, no key, same host as the Esri basemap tried earlier this session.
-  // Composited from commercial and aerial sources over time (not "today"
-  // like GIBS above), but goes to genuinely high resolution in populated
-  // areas, individual buildings and vehicles are visible well past zoom 17.
-  // Coverage quality varies by region the same way Google Earth's does.
-  const hiresSatelliteActive = activeOverlays.has('satellite_hires')
-  useEffect(() => {
-    const viewer = viewerRef.current
-    if (!viewer) return
-
-    if (!hiresSatelliteActive) {
-      if (hiresSatelliteLayerRef.current) {
-        viewer.imageryLayers.remove(hiresSatelliteLayerRef.current)
-        hiresSatelliteLayerRef.current = null
-      }
-      return
-    }
-
-    const layer = new ImageryLayer(
+    const goesWest = new ImageryLayer(
       new UrlTemplateImageryProvider({
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        maximumLevel: 19,
-        credit: new Credit('© Esri, Maxar, Earthstar Geographics, and the GIS user community'),
+        url: 'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/GOES-West_ABI_GeoColor/default/default/GoogleMapsCompatible_Level7/{z}/{y}/{x}.png',
+        maximumLevel: 7,
+        credit: new Credit('NOAA / NASA EOSDIS GIBS / GOES-West'),
       })
     )
-    viewer.imageryLayers.add(layer)
-    hiresSatelliteLayerRef.current = layer
+    viewer.imageryLayers.add(goesWest)
+    viewer.imageryLayers.add(goesEast)
+    // Only one ref to clean up both: they're always added/removed together.
+    satelliteLayerRef.current = goesEast
+    const secondLayer = goesWest
 
     return () => {
-      if (hiresSatelliteLayerRef.current && viewerRef.current) {
-        viewerRef.current.imageryLayers.remove(hiresSatelliteLayerRef.current)
-        hiresSatelliteLayerRef.current = null
+      if (viewerRef.current) {
+        viewerRef.current.imageryLayers.remove(secondLayer)
+        if (satelliteLayerRef.current) viewerRef.current.imageryLayers.remove(satelliteLayerRef.current)
       }
+      satelliteLayerRef.current = null
     }
-  }, [hiresSatelliteActive])
+  }, [liveSatelliteActive])
 
   // ── Citizen reports (first-hand field reports + self-reported news) ─────────
   const reportsActive = activeOverlays.has('reports')
