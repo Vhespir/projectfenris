@@ -29,8 +29,6 @@ const IP_BLOCKED = new Set([
   'https://www.fema.gov/about/news-multimedia/news/feed',
   'https://www.fema.gov/feeds/news-releases.xml',
   'https://www.dhs.gov/news/rss.xml',
-  'https://www.cisa.gov/cybersecurity-advisories/alerts.xml',
-  'https://www.cisa.gov/cybersecurity-advisories/cybersecurity-advisories.xml',
   'https://www.phmsa.dot.gov/news/rss.xml',
   'https://www.nrc.gov/public-involve/listserver-subscription/news-rss.xml',
   'https://www.iaea.org/newscenter/news/rss',
@@ -56,8 +54,10 @@ const DEDICATED_FEEDS = [
   { url: 'https://www.fema.gov/feeds/news-releases.xml',                               source: 'FEMA',       category: 'emergency',     region: null },
   { url: 'https://www.gdacs.org/xml/rss.xml',                                          source: 'GDACS',      category: 'emergency',     region: null },
   { url: 'https://www.dhs.gov/news/rss.xml',                                           source: 'DHS',        category: 'emergency',     region: null },
-  { url: 'https://www.cisa.gov/cybersecurity-advisories/alerts.xml',                   source: 'CISA',       category: 'cybersecurity', region: null },
-  { url: 'https://www.cisa.gov/cybersecurity-advisories/cybersecurity-advisories.xml', source: 'CISA',       category: 'cybersecurity', region: null },
+  // CISA's own advisory RSS feeds went from flaky to routinely broken
+  // (403s, empty bodies) even proxied. fetchers/cisa.js pulls the same
+  // ground truth (actively exploited vulnerabilities) from CISA's plain
+  // JSON catalog file instead, which has held up reliably in testing.
   { url: 'https://www.phmsa.dot.gov/news/rss.xml',                                     source: 'PHMSA',      category: 'infrastructure', region: null },
   { url: 'https://www.nrc.gov/public-involve/listserver-subscription/news-rss.xml',    source: 'NRC',        category: 'nuclear',       region: null },
   { url: 'https://www.iaea.org/newscenter/news/rss',                                   source: 'IAEA',       category: 'nuclear',       region: null },
@@ -134,7 +134,7 @@ const RELEVANCE_KEYWORDS = [
   'water contamination', 'toxic spill', 'superfund', 'fish kill', 'algal bloom',
 ]
 
-function isRelevant(title, summary) {
+export function isRelevant(title, summary) {
   const text = `${title ?? ''} ${summary ?? ''}`.toLowerCase()
   return RELEVANCE_KEYWORDS.some(kw => text.includes(kw))
 }

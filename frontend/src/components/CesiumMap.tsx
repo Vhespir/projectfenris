@@ -23,6 +23,7 @@ const SOURCE_SHAPE: Record<string, string> = {
   usgs:  'triangle',
   gdacs: 'pentagon',
   epa:   'diamond',
+  eonet: 'square',
 }
 
 const SEVERITY_SIZE: Record<string, number> = {
@@ -206,6 +207,7 @@ export default function CesiumMap({
   const eventsSourceRef = useRef<CustomDataSource | null>(null)
   const atSourceRef = useRef<CustomDataSource | null>(null)
   const firmsLayerRef = useRef<ImageryLayer | null>(null)
+  const satelliteLayerRef = useRef<ImageryLayer | null>(null)
   const reportsSourceRef = useRef<CustomDataSource | null>(null)
 
   const atStatesRef = useRef<unknown[][]>([])
@@ -706,6 +708,43 @@ export default function CesiumMap({
       }
     }
   }, [firesActive, fireRange])
+
+  // ── NASA GIBS true-color satellite layer ─────────────────────────────────────
+  // Free, no key, updated daily. GIBS processes each day's mosaic with a lag,
+  // so "today" 404s for at least the first several hours; yesterday's date
+  // is the latest that's reliably available. GoogleMapsCompatible_Level9
+  // caps out at zoom 9, which is fine for a global overview layer.
+  const satelliteActive = activeOverlays.has('satellite')
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+
+    if (!satelliteActive) {
+      if (satelliteLayerRef.current) {
+        viewer.imageryLayers.remove(satelliteLayerRef.current)
+        satelliteLayerRef.current = null
+      }
+      return
+    }
+
+    const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10)
+    const layer = new ImageryLayer(
+      new UrlTemplateImageryProvider({
+        url: `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/MODIS_Terra_CorrectedReflectance_TrueColor/default/${yesterday}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg`,
+        maximumLevel: 9,
+        credit: new Credit('NASA EOSDIS GIBS / MODIS Terra'),
+      })
+    )
+    viewer.imageryLayers.add(layer)
+    satelliteLayerRef.current = layer
+
+    return () => {
+      if (satelliteLayerRef.current && viewerRef.current) {
+        viewerRef.current.imageryLayers.remove(satelliteLayerRef.current)
+        satelliteLayerRef.current = null
+      }
+    }
+  }, [satelliteActive])
 
   // ── Citizen reports (first-hand field reports + self-reported news) ─────────
   const reportsActive = activeOverlays.has('reports')
