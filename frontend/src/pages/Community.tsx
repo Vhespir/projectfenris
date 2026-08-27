@@ -60,6 +60,31 @@ const FIELD_REPORT_CATEGORIES = [
   'Hazmat or Environmental', 'Medical or Health', 'General Observation',
 ]
 
+// Rough event_type -> Field Report category mapping, used only to pre-pick
+// a sensible category when someone says they're actually experiencing the
+// thing they're citing (see the "I'm experiencing this firsthand" switch).
+// Not meant to be exhaustive, General Observation is the fallback for
+// anything unrecognized.
+const EVENT_TYPE_TO_FIELD_CATEGORY: Record<string, string> = {
+  earthquake: 'Natural Disaster',
+  volcano: 'Natural Disaster',
+  tsunami: 'Natural Disaster',
+  landslide: 'Natural Disaster',
+  flood: 'Natural Disaster',
+  wildfire: 'Natural Disaster',
+  tropical_cyclone: 'Weather Event',
+  severe_storm: 'Weather Event',
+  drought: 'Weather Event',
+  winter_storm: 'Weather Event',
+  hurricane: 'Weather Event',
+  tornado: 'Weather Event',
+}
+
+function fieldCategoryForEventType(eventType?: string): string {
+  if (!eventType) return 'General Observation'
+  return EVENT_TYPE_TO_FIELD_CATEGORY[eventType.toLowerCase()] ?? 'General Observation'
+}
+
 const TYPE_COLOR: Record<string, string> = {
   community:          'var(--color-info)',
   field_report:       'var(--color-warning)',
@@ -285,7 +310,7 @@ export default function Community() {
   // is what actually gets sent on submit, since the user can clear the chip
   // and post without citing anything.
   const [activeCite, setActiveCite] = useState(citeSlug)
-  const [citeContext, setCiteContext] = useState<{ type: string; title: string; source?: string; severity?: string; category?: string } | null>(null)
+  const [citeContext, setCiteContext] = useState<{ type: string; title: string; source?: string; severity?: string; category?: string; event_type?: string } | null>(null)
   const [citeLoading, setCiteLoading] = useState(!!citeSlug)
 
   const citeTitleFilledRef = useRef(false)
@@ -662,6 +687,25 @@ export default function Community() {
                       <span style={{ fontFamily: 'var(--font-mono)' }}>#{activeCite}</span>
                     )}
                   </div>
+                  {citeContext?.type === 'event' && form.post_type !== 'field_report' && (
+                    <button
+                      type="button"
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        post_type: 'field_report',
+                        category: fieldCategoryForEventType(citeContext.event_type),
+                      }))}
+                      title="Switch to Field Report, since you're actually there seeing this"
+                      style={{
+                        flexShrink: 0, padding: '3px 9px', borderRadius: '4px', fontSize: '11px',
+                        fontFamily: 'var(--font-mono)', cursor: 'pointer', whiteSpace: 'nowrap',
+                        border: '1px solid rgba(245,158,11,0.3)', background: 'rgba(245,158,11,0.08)',
+                        color: 'var(--color-warning)',
+                      }}
+                    >
+                      I'm experiencing this firsthand
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => setActiveCite(null)}
