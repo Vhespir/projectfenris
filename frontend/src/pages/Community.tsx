@@ -315,11 +315,15 @@ export default function Community() {
   const defaultCategory = channel.category ?? ''
 
   const [form, setForm] = useState({
-    // Citing something is almost always "here's what I'm seeing about this
-    // event," which is what Field Report is for, so that's a better
-    // starting point than whatever channel the composer happened to open
-    // from. Still just a default, the Type dropdown is right there.
-    post_type: citeSlug || (initLat && initLon) ? 'field_report' : defaultType,
+    // initLat/initLon comes from an actual "report from here" action (a map
+    // right-click, "use my location"), which really does mean firsthand
+    // ground presence, so Field Report fits there. Citing a thread does
+    // NOT mean that: "Post about this" shows up on every event, including
+    // ones nowhere near the person clicking it (a flood on the other side
+    // of the planet), so defaulting to Field Report there would falsely
+    // claim firsthand presence. Citing keeps whatever the channel's own
+    // default type is instead.
+    post_type: (initLat && initLon) ? 'field_report' : defaultType,
     category: defaultCategory,
     title: '',
     body: '',
