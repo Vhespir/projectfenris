@@ -121,7 +121,7 @@ function setupClustering(ds: CustomDataSource, pixelRange = 60) {
   ds.clustering.minimumClusterSize = 2
   ds.clustering.clusterEvent.addEventListener((entities: Entity[], cluster: unknown) => {
     const c = cluster as {
-      billboard: { show: boolean; image: string; width: number; height: number; disableDepthTestDistance: number }
+      billboard: { id: unknown; show: boolean; image: string; width: number; height: number; disableDepthTestDistance: number }
       label: { show: boolean }
       point: { show: boolean }
     }
@@ -134,6 +134,11 @@ function setupClustering(ds: CustomDataSource, pixelRange = 60) {
     c.billboard.width = sz
     c.billboard.height = sz
     c.billboard.disableDepthTestDistance = Number.POSITIVE_INFINITY
+    // Cesium only puts the clustered entities array on cluster.label.id,
+    // never on the billboard, but the badge is the billboard (the label
+    // is hidden above). Without this, picking the visible badge returns
+    // no id at all and the click handler's cluster branch never fires.
+    c.billboard.id = entities
   })
 }
 
