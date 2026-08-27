@@ -2,6 +2,7 @@
 
 interface ImportMetaEnv {
   readonly VITE_CESIUM_ION_TOKEN: string
+  readonly VITE_CARTO_API_KEY: string
 }
 
 interface ImportMeta {

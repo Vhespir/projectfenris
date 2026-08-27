@@ -100,17 +100,19 @@ services:
 
   frontend:
     # Was running the bare Vite dev server (unminified, not meant for public
-    # internet exposure) as "prod" -- Dockerfile.prod actually builds a static
+    # internet exposure) as "prod": Dockerfile.prod actually builds a static
     # production bundle and serves it with nginx. VITE_CESIUM_ION_TOKEN moved
     # from a runtime env var to a build arg accordingly: Vite bakes VITE_-
     # prefixed vars into the bundle at build time, not request time, when it's
     # a real build rather than the dev server. Changing this value now needs a
     # redeploy (which rebuilds the image) to take effect, not just a restart.
+    # VITE_CARTO_API_KEY works the same way.
     build:
       context: ./frontend
       dockerfile: Dockerfile.prod
       args:
         VITE_CESIUM_ION_TOKEN: ${VITE_CESIUM_ION_TOKEN}
+        VITE_CARTO_API_KEY: ${VITE_CARTO_API_KEY}
     restart: unless-stopped
     networks:
       - fenris-network
