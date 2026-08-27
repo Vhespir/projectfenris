@@ -8,14 +8,16 @@ const SOURCES = [
   { key: 'usgs',  label: 'Seismic (USGS)' },
   { key: 'gdacs', label: 'Global (GDACS)' },
   { key: 'epa',   label: 'Air Quality (EPA)' },
+  { key: 'eonet', label: 'NASA EONET' },
 ]
 
 const OVERLAYS = [
-  { key: 'radar',   label: 'Radar' },
-  { key: 'alerts',  label: 'Weather Alerts' },
-  { key: 'traffic', label: 'Air Traffic' },
-  { key: 'fires',   label: 'Fires' },
-  { key: 'reports', label: 'Citizen Reports' },
+  { key: 'radar',     label: 'Radar' },
+  { key: 'alerts',    label: 'Weather Alerts' },
+  { key: 'traffic',   label: 'Air Traffic' },
+  { key: 'fires',     label: 'Fires' },
+  { key: 'satellite', label: 'Satellite (Daily)' },
+  { key: 'reports',   label: 'Citizen Reports' },
 ]
 
 const FIRE_RANGES: { key: FireTimeRange; label: string; desc: string }[] = [
@@ -45,6 +47,7 @@ const LEGEND_SOURCES = [
   { shape: 'triangle', color: '#F59E0B', label: 'USGS Seismic' },
   { shape: 'pentagon', color: '#3B82F6', label: 'GDACS Global' },
   { shape: 'diamond',  color: '#A78BFA', label: 'EPA Air Quality' },
+  { shape: 'square',   color: '#71717A', label: 'NASA EONET' },
   { shape: 'square',   color: '#F59E0B', label: 'Field Report' },
   { shape: 'square',   color: '#38BDF8', label: 'Self-Reported News' },
 ]
@@ -80,7 +83,7 @@ export default function MapPage() {
   const [events, setEvents] = useState<DisasterEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeFilters, setActiveFilters] = useState(new Set(['usgs', 'gdacs', 'epa']))
+  const [activeFilters, setActiveFilters] = useState(new Set(['usgs', 'gdacs', 'epa', 'eonet']))
   const [activeOverlays, setActiveOverlays] = useState(new Set(['radar', 'alerts']))
 
   const [atFilters, setAtFilters] = useState<AirTrafficFilters>({ altitudeBand: 'all', emergencyOnly: false })
@@ -95,7 +98,7 @@ export default function MapPage() {
   const flyToRef = useRef<((lat: number, lon: number) => void) | null>(null)
 
   useEffect(() => {
-    fetch('/api/events?sources=usgs,gdacs,epa&limit=1000')
+    fetch('/api/events?sources=usgs,gdacs,epa,eonet&limit=1000')
       .then(r => r.json())
       .then(data => { setEvents(data); setLoading(false) })
       .catch(() => { setError('Failed to load event data'); setLoading(false) })

@@ -595,6 +595,7 @@ const SOURCE_SHAPE: Record<string, string> = {
   usgs:  'triangle',
   gdacs: 'pentagon',
   epa:   'diamond',
+  eonet: 'square',
 }
 
 function formatTime(iso: string | null) {

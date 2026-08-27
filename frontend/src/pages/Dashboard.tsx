@@ -89,7 +89,7 @@ const POST_TYPE_LABEL: Record<string, string> = {
 const POST_TYPE_COLOR: Record<string, string> = {
   community: '#3B82F6', field_report: '#F59E0B', self_reported_news: '#22C55E',
 }
-const ALL_MAP_SOURCES = new Set(['usgs', 'gdacs', 'epa'])
+const ALL_MAP_SOURCES = new Set(['usgs', 'gdacs', 'epa', 'eonet'])
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
