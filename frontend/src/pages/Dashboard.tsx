@@ -386,28 +386,22 @@ function MapAutoResize() {
   return null
 }
 
-// CARTO's dark_all raster tiles (used here and in CesiumMap.tsx) started
-// returning a plain "API KEY REQUIRED" watermark tile instead of map data,
-// across every CARTO host tried, including their fastly CDN mirror. That's
-// CARTO's own policy change, not anything on this end, and there's no
-// account of ours to fix by adding a key since these were always the
-// anonymous/free tiles. Replaced with Esri's Dark Gray Canvas, which is
-// still free with no key: a base layer plus a separate transparent
-// reference layer for labels and borders, stacked to match what the single
-// CARTO tile used to provide in one image.
+// CARTO's dark_all raster tiles now require an API key on every host,
+// including their fastly CDN mirror, where they used to be free anonymous
+// tiles. VITE_CARTO_API_KEY is a build-time value (see Dockerfile.prod),
+// baked into the bundle and visible client-side, same as the Cesium ion
+// token: that's expected, tile requests are made directly from the
+// browser either way.
+const CARTO_TILE_URL = `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${import.meta.env.VITE_CARTO_API_KEY}`
+const CARTO_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com">CARTO</a>'
+
 function DarkBasemapLayers() {
   return (
-    <>
-      <TileLayer
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
-        attribution='&copy; <a href="https://www.esri.com">Esri</a>'
-        maxZoom={19} maxNativeZoom={16}
-      />
-      <TileLayer
-        url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
-        maxZoom={19} maxNativeZoom={16}
-      />
-    </>
+    <TileLayer
+      url={CARTO_TILE_URL}
+      attribution={CARTO_ATTRIBUTION}
+      maxZoom={19}
+    />
   )
 }
 
