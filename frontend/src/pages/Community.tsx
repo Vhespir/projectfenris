@@ -324,7 +324,13 @@ export default function Community() {
     // claim firsthand presence. Citing keeps whatever the channel's own
     // default type is instead.
     post_type: (initLat && initLon) ? 'field_report' : defaultType,
-    category: defaultCategory,
+    // A citation is a reaction to a specific event, not a topic post, and
+    // none of the community categories (Gear, Food, Medical...) actually
+    // fit that. General Discussion is the least-wrong bucket, so citing
+    // defaults there instead of leaving the category blank and making
+    // someone pick an unrelated topic just to say something about a flood
+    // warning.
+    category: citeSlug ? 'General Discussion' : defaultCategory,
     title: '',
     body: '',
     location_label: '',
