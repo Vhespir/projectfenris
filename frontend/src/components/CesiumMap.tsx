@@ -344,7 +344,6 @@ export default function CesiumMap({
       billboard: {
         image: svgUrl('circle', '#22C55E', 16),
         width: 16, height: 16,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
         heightReference: HeightReference.CLAMP_TO_GROUND,
       },
     })
@@ -356,7 +355,6 @@ export default function CesiumMap({
         billboard: {
           image: svgUrl('circle', '#22C55E', 16),
           width: 16, height: 16,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           heightReference: HeightReference.CLAMP_TO_GROUND,
         },
       })
@@ -406,7 +404,6 @@ export default function CesiumMap({
           image: svgUrl(shape, color, size + 8),
           width: size + 8,
           height: size + 8,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
           heightReference: HeightReference.CLAMP_TO_GROUND,
         },
         description: `
@@ -684,7 +681,6 @@ export default function CesiumMap({
               image: svgUrl('diamond', color, 22),
               width: 22,
               height: 22,
-              disableDepthTestDistance: Number.POSITIVE_INFINITY,
               heightReference: HeightReference.CLAMP_TO_GROUND,
             },
             description: `
@@ -780,7 +776,6 @@ export default function CesiumMap({
           image: planeUrl(track ?? 0, color, size),
           width: size,
           height: size,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         description: `
           <div style="font-family:'Space Grotesk',sans-serif;min-width:220px;background:#111111;color:#F4F4F5;border-radius:6px;padding:0">
