@@ -386,6 +386,31 @@ function MapAutoResize() {
   return null
 }
 
+// CARTO's dark_all raster tiles (used here and in CesiumMap.tsx) started
+// returning a plain "API KEY REQUIRED" watermark tile instead of map data,
+// across every CARTO host tried, including their fastly CDN mirror. That's
+// CARTO's own policy change, not anything on this end, and there's no
+// account of ours to fix by adding a key since these were always the
+// anonymous/free tiles. Replaced with Esri's Dark Gray Canvas, which is
+// still free with no key: a base layer plus a separate transparent
+// reference layer for labels and borders, stacked to match what the single
+// CARTO tile used to provide in one image.
+function DarkBasemapLayers() {
+  return (
+    <>
+      <TileLayer
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+        attribution='&copy; <a href="https://www.esri.com">Esri</a>'
+        maxZoom={19} maxNativeZoom={16}
+      />
+      <TileLayer
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
+        maxZoom={19} maxNativeZoom={16}
+      />
+    </>
+  )
+}
+
 function RadarWidgetContent() {
   return (
     <div style={{ height: '100%' }}>
@@ -394,11 +419,7 @@ function RadarWidgetContent() {
         scrollWheelZoom={false} zoomControl={false}
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com">CARTO</a>'
-          maxZoom={19}
-        />
+        <DarkBasemapLayers />
         <MapAutoResize />
         <RadarLayer />
       </MapContainer>
@@ -416,11 +437,7 @@ function MapContent({ data }: { data: DashData }) {
         maxBounds={[[-85, -200], [85, 200]]} maxBoundsViscosity={0.8}
         style={{ height: '100%', width: '100%' }}
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com">CARTO</a>'
-          maxZoom={19}
-        />
+        <DarkBasemapLayers />
         <MapAutoResize />
         <GeolocateUser />
         <RadarLayer />
