@@ -314,7 +314,8 @@ export default function CesiumMap({
       // Zoom into the cluster's bounding sphere instead, same as clicking a
       // cluster on a normal map does.
       if (defined(picked) && Array.isArray(picked.id)) {
-        const positions = (picked.id as Entity[])
+        const clustered = picked.id as Entity[]
+        const positions = clustered
           .map(e => e.position?.getValue(JulianDate.now()))
           .filter((p): p is Cartesian3 => !!p)
         if (positions.length > 0) {
@@ -324,7 +325,29 @@ export default function CesiumMap({
             offset: new HeadingPitchRange(0, -Math.PI / 2, Math.max(sphere.radius * 3, 50000)),
           })
         }
-        setSidebar(null)
+        // Zooming in isn't enough on its own: tightly-packed points can
+        // still read as one cluster at the new zoom level, so clicking felt
+        // like it did nothing. Show what's actually in the cluster right
+        // away by stacking each entity's own popup content in the sidebar.
+        const items = clustered
+          .map(e => e.description?.getValue(JulianDate.now()) as string | undefined)
+          .filter((html): html is string => !!html)
+        if (items.length > 0) {
+          setSidebar({
+            html: `
+              <div style="font-family:'Space Grotesk',sans-serif;min-width:220px">
+                <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#71717A;margin-bottom:10px">
+                  ${items.length} items in this cluster
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px;max-height:60vh;overflow-y:auto">
+                  ${items.map(html => `<div style="border-top:1px solid #262626;padding-top:10px">${html}</div>`).join('')}
+                </div>
+              </div>
+            `,
+          })
+        } else {
+          setSidebar(null)
+        }
         return
       }
       setSidebar(null)
