@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Viewer, Cartesian3, Color, ImageryLayer, UrlTemplateImageryProvider,
-  WebMapServiceImageryProvider, GeoJsonDataSource, CustomDataSource,
+  WebMapServiceImageryProvider, WebMercatorTilingScheme, GeoJsonDataSource, CustomDataSource,
   ColorMaterialProperty, ConstantProperty, ScreenSpaceEventType,
   JulianDate, Credit, HeightReference, defined, Entity, Cartesian2,
   Ion, createWorldTerrainAsync, BoundingSphere, HeadingPitchRange,
@@ -208,6 +208,7 @@ export default function CesiumMap({
   const atSourceRef = useRef<CustomDataSource | null>(null)
   const firmsLayerRef = useRef<ImageryLayer | null>(null)
   const satelliteLayerRef = useRef<ImageryLayer | null>(null)
+  const hiresSatelliteLayerRef = useRef<ImageryLayer | null>(null)
   const reportsSourceRef = useRef<CustomDataSource | null>(null)
 
   const atStatesRef = useRef<unknown[][]>([])
@@ -245,6 +246,7 @@ export default function CesiumMap({
         new UrlTemplateImageryProvider({
           url: `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png?key=${import.meta.env.VITE_CARTO_API_KEY}`,
           subdomains: ['a', 'b', 'c', 'd'],
+          tilingScheme: new WebMercatorTilingScheme(),
           maximumLevel: 19,
           credit: new Credit('© OpenStreetMap contributors © CARTO'),
         })
@@ -709,12 +711,22 @@ export default function CesiumMap({
     }
   }, [firesActive, fireRange])
 
-  // ── NASA GIBS true-color satellite layer ─────────────────────────────────────
+  // ── NASA GIBS true-color satellite layer (daily, global, cloud cover) ───────
   // Free, no key, updated daily. GIBS processes each day's mosaic with a lag,
   // so "today" 404s for at least the first several hours; yesterday's date
   // is the latest that's reliably available. GoogleMapsCompatible_Level9
-  // caps out at zoom 9, which is fine for a global overview layer.
-  const satelliteActive = activeOverlays.has('satellite')
+  // caps out at zoom 9 (~305m/pixel), which is what this actually is: a
+  // same-day view of the whole planet including today's cloud cover, not a
+  // close-up basemap. See hiresSatelliteActive below for that.
+  //
+  // The dark wedge-shaped gaps visible in this layer are real: MODIS Terra
+  // is a single polar-orbiting satellite, and a single day's pass doesn't
+  // fully cover every longitude, especially near the equator. Confirmed by
+  // pulling the raw tiles directly (no Cesium involved) across a week of
+  // different dates, same gaps every time, not a rendering bug and not
+  // something a projection/tiling fix can close. NASA's own Worldview
+  // viewer shows the identical gaps for the same reason.
+  const satelliteActive = activeOverlays.has('satellite_daily')
   useEffect(() => {
     const viewer = viewerRef.current
     if (!viewer) return
@@ -745,6 +757,43 @@ export default function CesiumMap({
       }
     }
   }, [satelliteActive])
+
+  // ── Esri World Imagery (close-up satellite/aerial, Google Earth-style) ──────
+  // Free, no key, same host as the Esri basemap tried earlier this session.
+  // Composited from commercial and aerial sources over time (not "today"
+  // like GIBS above), but goes to genuinely high resolution in populated
+  // areas, individual buildings and vehicles are visible well past zoom 17.
+  // Coverage quality varies by region the same way Google Earth's does.
+  const hiresSatelliteActive = activeOverlays.has('satellite_hires')
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (!viewer) return
+
+    if (!hiresSatelliteActive) {
+      if (hiresSatelliteLayerRef.current) {
+        viewer.imageryLayers.remove(hiresSatelliteLayerRef.current)
+        hiresSatelliteLayerRef.current = null
+      }
+      return
+    }
+
+    const layer = new ImageryLayer(
+      new UrlTemplateImageryProvider({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        maximumLevel: 19,
+        credit: new Credit('© Esri, Maxar, Earthstar Geographics, and the GIS user community'),
+      })
+    )
+    viewer.imageryLayers.add(layer)
+    hiresSatelliteLayerRef.current = layer
+
+    return () => {
+      if (hiresSatelliteLayerRef.current && viewerRef.current) {
+        viewerRef.current.imageryLayers.remove(hiresSatelliteLayerRef.current)
+        hiresSatelliteLayerRef.current = null
+      }
+    }
+  }, [hiresSatelliteActive])
 
   // ── Citizen reports (first-hand field reports + self-reported news) ─────────
   const reportsActive = activeOverlays.has('reports')
