@@ -227,14 +227,26 @@ export default function CesiumMap({
       navigationInstructionsInitiallyVisible: false,
     })
 
+    // CARTO's dark_all tiles now require an API key on every mirror
+    // (returns a watermark image instead of map data), so the base map is
+    // Esri's Dark Gray Canvas instead: still free, no key. It ships as two
+    // layers, a base plus a transparent reference layer for labels and
+    // borders, and its tile URLs use {z}/{y}/{x} order, not {z}/{x}/{y}.
     viewer.imageryLayers.removeAll()
     viewer.imageryLayers.add(
       new ImageryLayer(
         new UrlTemplateImageryProvider({
-          url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-          subdomains: ['a', 'b', 'c', 'd'],
-          maximumLevel: 19,
-          credit: new Credit('© OpenStreetMap contributors © CARTO'),
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 16,
+          credit: new Credit('© Esri'),
+        })
+      )
+    )
+    viewer.imageryLayers.add(
+      new ImageryLayer(
+        new UrlTemplateImageryProvider({
+          url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+          maximumLevel: 16,
         })
       )
     )

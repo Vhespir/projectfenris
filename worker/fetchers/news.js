@@ -139,10 +139,31 @@ function isRelevant(title, summary) {
   return RELEVANCE_KEYWORDS.some(kw => text.includes(kw))
 }
 
+// rss-parser only builds contentSnippet from a content/content:encoded
+// field. Atom feeds that put their body in <summary type="xhtml"> (PTWC's
+// tsunami feed does this) fall through to item.summary as the raw
+// serialized markup, tags and all. Strip it down to plain text so it's
+// actually readable, and so it doesn't blow past display truncation limits
+// with a wall of HTML.
+function stripHtml(html) {
+  if (!html) return null
+  const text = html
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text || null
+}
+
 async function storeFeedItem(item, feed, skipFilter = false) {
   if (!item.title || !item.link) return 0
   const title = item.title.trim()
-  const summary = item.contentSnippet?.trim() || item.summary?.trim() || null
+  const summary = stripHtml(item.contentSnippet?.trim() || item.summary?.trim() || null)
   if (!skipFilter && !isRelevant(title, summary)) return 0
 
   const { rowCount } = await pool.query(`
