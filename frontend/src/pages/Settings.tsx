@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { pushSupported, subscribeToPush, unsubscribeFromPush } from '../utils/push'
+import { fetchFeedSourceCatalog, subscribedSourceIds, type FeedSourceCatalog } from '../utils/feedSources'
 
 const THREAT_OPTIONS = [
   'Tornado', 'Hurricane', 'Earthquake', 'Wildfire', 'Flood',
@@ -91,6 +92,11 @@ export default function Settings() {
   })
   const [pushBusy, setPushBusy] = useState(false)
   const [pushError, setPushError] = useState<string | null>(null)
+  const [sourceCatalog, setSourceCatalog] = useState<FeedSourceCatalog>({ groups: [], defaultIds: [] })
+  const [subscribedSources, setSubscribedSources] = useState<string[]>([])
+  const [sourceSearch, setSourceSearch] = useState('')
+  const [sourcesSaving, setSourcesSaving] = useState(false)
+  const [sourcesSaved, setSourcesSaved] = useState(false)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -139,6 +145,10 @@ export default function Settings() {
             radius_km:  data.notification_prefs.radius_km  ?? 150,
           })
         }
+        fetchFeedSourceCatalog().then(catalog => {
+          setSourceCatalog(catalog)
+          setSubscribedSources(subscribedSourceIds(data.preferences, catalog))
+        })
       })
   }, [])
 
@@ -187,6 +197,41 @@ export default function Settings() {
       else setPushError('Push permission was denied or the subscription failed. Check your browser notification settings.')
     } finally {
       setPushBusy(false)
+    }
+  }
+
+  function toggleSource(id: string) {
+    setSourcesSaved(false)
+    setSubscribedSources(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  function setGroupSources(ids: string[], on: boolean) {
+    setSourcesSaved(false)
+    setSubscribedSources(prev => on
+      ? [...new Set([...prev, ...ids])]
+      : prev.filter(x => !ids.includes(x))
+    )
+  }
+
+  function resetSourcesToDefault() {
+    setSourcesSaved(false)
+    setSubscribedSources(sourceCatalog.defaultIds)
+  }
+
+  async function saveSources() {
+    setSourcesSaving(true)
+    try {
+      const res = await fetch('/api/users/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preferences: { feedSources: subscribedSources } }),
+      })
+      if (res.ok) {
+        setSourcesSaved(true)
+        setTimeout(() => setSourcesSaved(false), 2000)
+      }
+    } finally {
+      setSourcesSaving(false)
     }
   }
 
@@ -689,6 +734,92 @@ export default function Settings() {
               </div>
             </>
           )}
+        </div>
+
+        {/* Feed Sources */}
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>Feed Sources</div>
+          <p style={{ fontSize: '13px', color: 'var(--color-muted)', marginBottom: '14px' }}>
+            Subscribe to the sources you actually want in your feed and on the map, RSS-reader style.
+            A curated default set is on to start; everything else is opt-in.
+          </p>
+
+          <input
+            value={sourceSearch}
+            onChange={e => setSourceSearch(e.target.value)}
+            placeholder="Search sources..."
+            style={{ ...inputStyle, marginBottom: '14px' }}
+          />
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '14px' }}>
+            {sourceCatalog.groups.map(group => {
+              const q = sourceSearch.trim().toLowerCase()
+              const visible = q ? group.sources.filter(s => s.label.toLowerCase().includes(q)) : group.sources
+              if (visible.length === 0) return null
+              const ids = group.sources.map(s => s.id)
+              const allOn = ids.every(id => subscribedSources.includes(id))
+              return (
+                <div key={group.label}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ fontFamily: 'var(--font-display)', fontSize: '12px', fontWeight: 600, color: 'var(--color-text)' }}>
+                      {group.label}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setGroupSources(ids, !allOn)}
+                      style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', background: 'none', border: 'none', color: 'var(--color-accent)', cursor: 'pointer', padding: 0 }}
+                    >
+                      {allOn ? 'Deselect all' : 'Select all'}
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    {visible.map(source => {
+                      const on = subscribedSources.includes(source.id)
+                      return (
+                        <button
+                          key={source.id}
+                          type="button"
+                          onClick={() => toggleSource(source.id)}
+                          style={{
+                            padding: '5px 10px', borderRadius: '5px', fontSize: '12px', cursor: 'pointer',
+                            border: `1px solid ${on ? 'var(--color-accent)' : 'var(--color-border)'}`,
+                            background: on ? 'rgba(34,197,94,0.1)' : 'var(--color-bg)',
+                            color: on ? 'var(--color-accent)' : 'var(--color-muted)',
+                          }}
+                        >
+                          {source.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              type="button"
+              onClick={saveSources}
+              disabled={sourcesSaving}
+              style={{
+                padding: '7px 16px', borderRadius: '6px', fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 600,
+                cursor: sourcesSaving ? 'not-allowed' : 'pointer',
+                background: sourcesSaved ? 'rgba(34,197,94,0.2)' : 'var(--color-accent)',
+                color: sourcesSaved ? 'var(--color-accent)' : '#0A0A0A',
+                border: sourcesSaved ? '1px solid var(--color-accent)' : 'none',
+              }}
+            >
+              {sourcesSaved ? 'Saved' : sourcesSaving ? 'Saving...' : 'Save Sources'}
+            </button>
+            <button
+              type="button"
+              onClick={resetSourcesToDefault}
+              style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', background: 'none', border: 'none', color: 'var(--color-subtle)', cursor: 'pointer' }}
+            >
+              Reset to default
+            </button>
+          </div>
         </div>
 
         {error && (

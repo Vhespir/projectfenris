@@ -24,6 +24,7 @@ import { inventoryRoutes } from './routes/inventory.js'
 import { gardenRoutes } from './routes/garden.js'
 import { refRoutes } from './routes/refs.js'
 import { pushRoutes } from './routes/push.js'
+import { feedSourceRoutes } from './routes/feedSources.js'
 import { checkMuted } from './lib/moderation.js'
 import { initSocket } from './lib/socket.js'
 import { startEventNotifier } from './lib/eventNotifier.js'
@@ -182,7 +183,11 @@ app.get('/news', async (req) => {
     if (cats.length === 1) { params.push(cats[0]); query += ` AND category = $${params.length}` }
     else if (cats.length > 1) { params.push(cats); query += ` AND category = ANY($${params.length}::text[])` }
   }
-  if (source) { params.push(String(source).trim()); query += ` AND source = $${params.length}` }
+  if (source) {
+    const srcs = String(source).split(',').map(s => s.trim()).filter(Boolean)
+    if (srcs.length === 1) { params.push(srcs[0]); query += ` AND source = $${params.length}` }
+    else if (srcs.length > 1) { params.push(srcs); query += ` AND source = ANY($${params.length}::text[])` }
+  }
   if (days) {
     const d = Math.min(Math.max(Number(days), 1), 90)
     query += ` AND published_at > NOW() - INTERVAL '${d} days'`
@@ -397,6 +402,7 @@ await app.register(inventoryRoutes, { pool })
 await app.register(gardenRoutes, { pool })
 await app.register(refRoutes, { pool })
 await app.register(pushRoutes, { pool })
+await app.register(feedSourceRoutes)
 
 try {
   await runMigrations(process.env.DATABASE_URL)
