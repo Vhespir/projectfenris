@@ -1,11 +1,10 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useAuth } from '../context/AuthContext'
 import { useSocket } from '../context/SocketContext'
 import { getTier } from '../utils/tier'
 import { useContextDrawer } from '../context/ContextDrawerContext'
-import { fetchFeedSourceCatalog, subscribedSourceIds, sourceQueryValues, type FeedSourceCatalog } from '../utils/feedSources'
 
 interface GeoJSON {
   type: string
@@ -95,7 +94,7 @@ const SEVERITY_COLOR: Record<string, string> = {
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  noaa: 'NOAA', usgs: 'USGS', gdacs: 'GDACS', epa: 'EPA', eonet: 'EONET', meteoalarm: 'MeteoAlarm',
+  noaa: 'NOAA', usgs: 'USGS', gdacs: 'GDACS', epa: 'EPA',
 }
 
 const CAT_COLOR: Record<string, string> = {
@@ -345,6 +344,7 @@ function readFilters(): Record<string, unknown> {
   try { return JSON.parse(localStorage.getItem('feed_filters') ?? '{}') } catch { return {} }
 }
 
+const SOURCE_FILTERS = ['noaa', 'usgs', 'gdacs', 'epa'] as const
 const SEVERITY_LEVELS = ['Extreme', 'Severe', 'Moderate', 'Minor'] as const
 
 const SEVERITY_SCORE: Record<string, number> = {
@@ -395,21 +395,24 @@ export default function FeedPage() {
   const [nearMe, setNearMe] = useState<boolean>(() => (readFilters().nearMe as boolean) ?? true)
   const [nearMeKm, setNearMeKm] = useState<number>(() => (readFilters().nearMeKm as number) ?? 500)
   const [timePeriod, setTimePeriod] = useState<number>(() => (readFilters().timePeriod as number) ?? 7)
-  const [sourceCatalog, setSourceCatalog] = useState<FeedSourceCatalog>({ groups: [], defaultIds: [] })
-  const [mobileColumn, setMobileColumn] = useState<'events' | 'news' | 'reports'>('events')
+
+  const [showEvents, setShowEvents] = useState<boolean>(() => (readFilters().showEvents as boolean) ?? true)
+  const [showNews, setShowNews] = useState<boolean>(() => (readFilters().showNews as boolean) ?? true)
+  const [showFieldReports, setShowFieldReports] = useState<boolean>(() => (readFilters().showFieldReports as boolean) ?? true)
+  const [showCommunityReports, setShowCommunityReports] = useState<boolean>(() => (readFilters().showCommunityReports as boolean) ?? true)
+  const [activeSources, setActiveSources] = useState<Set<string>>(new Set())
   const [activeSeverities, setActiveSeverities] = useState<Set<string>>(new Set())
   const [activeEventTypes, setActiveEventTypes] = useState<Set<string>>(new Set())
   const [activeNewsCategories, setActiveNewsCategories] = useState<Set<string>>(new Set())
+  const [activeNewsSources, setActiveNewsSources] = useState<Set<string>>(new Set())
   const [keywordFilterOn, setKeywordFilterOn] = useState(false)
   const [kwInput, setKwInput] = useState('')
   const [sortBy, setSortBy] = useState<'newest' | 'severity'>(() => (readFilters().sortBy as 'newest' | 'severity') ?? 'newest')
   const [eventTypesExpanded, setEventTypesExpanded] = useState(false)
-  // Three independent columns instead of one merged list means three
-  // independent "show more" counters instead of one shared displayCount.
-  const [eventsShown, setEventsShown] = useState(30)
-  const [newsShown, setNewsShown] = useState(30)
-  const [reportsShown, setReportsShown] = useState(30)
+  const [newsSourcesExpanded, setNewsSourcesExpanded] = useState(false)
+  const [displayCount, setDisplayCount] = useState(30)
   const [searchText, setSearchText] = useState('')
+  const sentinelRef = useRef<HTMLDivElement>(null)
   const initKeywords = ((user?.preferences as Record<string, unknown> | undefined)?.feed as { keywords?: string[] } | undefined)?.keywords ?? []
   const [savedKeywords, setSavedKeywords] = useState<string[]>(initKeywords)
 
@@ -418,32 +421,11 @@ export default function FeedPage() {
     if (Array.isArray(kws)) setSavedKeywords(kws)
   }, [user?.id])
 
-  useEffect(() => { fetchFeedSourceCatalog().then(setSourceCatalog) }, [])
-
-  // Which sources actually get requested now comes from the same
-  // subscription Settings and the Dashboard use, not a hardcoded source
-  // list (the old one was noaa,usgs,gdacs,epa, missing EONET and
-  // MeteoAlarm entirely) and not this page's own separate filter UI.
-  function buildFeedUrls() {
-    const catalogReady = sourceCatalog.groups.length > 0
-    const subscribed = subscribedSourceIds(user?.preferences, sourceCatalog)
-    const eventSources = sourceQueryValues(subscribed, sourceCatalog, 'event')
-    const newsSources = sourceQueryValues(subscribed, sourceCatalog, 'news')
-    const eventsUrl = !catalogReady ? `/api/events?days=${timePeriod}`
-      : eventSources.length ? `/api/events?days=${timePeriod}&sources=${eventSources.map(encodeURIComponent).join(',')}`
-      : null
-    const newsUrl = !catalogReady ? `/api/news?days=${timePeriod}&limit=2000`
-      : newsSources.length ? `/api/news?days=${timePeriod}&limit=2000&source=${newsSources.map(encodeURIComponent).join(',')}`
-      : null
-    return { eventsUrl, newsUrl }
-  }
-
-  function loadFeed() {
+  useEffect(() => {
     setLoading(true)
-    const { eventsUrl, newsUrl } = buildFeedUrls()
     Promise.all([
-      eventsUrl ? fetch(eventsUrl).then(r => r.json()) : Promise.resolve([]),
-      newsUrl ? fetch(newsUrl).then(r => r.json()) : Promise.resolve([]),
+      fetch(`/api/events?sources=noaa,usgs,gdacs,epa&days=${timePeriod}`).then(r => r.json()),
+      fetch(`/api/news?days=${timePeriod}&limit=2000`).then(r => r.json()),
       fetch(`/api/posts?limit=500`).then(r => r.json()),
     ]).then(([evts, nws, psts]) => {
       setEvents(Array.isArray(evts) ? evts : [])
@@ -454,9 +436,7 @@ export default function FeedPage() {
       setPosts(community)
       setLoading(false)
     }).catch(() => setLoading(false))
-  }
-
-  useEffect(loadFeed, [timePeriod, sourceCatalog, user])
+  }, [timePeriod])
 
   useEffect(() => {
     if (!socket) return
@@ -467,9 +447,11 @@ export default function FeedPage() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('feed_filters', JSON.stringify({ nearMe, nearMeKm, sortBy, timePeriod }))
+      localStorage.setItem('feed_filters', JSON.stringify({
+        nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports, timePeriod,
+      }))
     } catch {}
-  }, [nearMe, nearMeKm, sortBy, timePeriod])
+  }, [nearMe, nearMeKm, sortBy, showEvents, showNews, showFieldReports, showCommunityReports, timePeriod])
 
   function toggle<T>(set: Set<T>, val: T): Set<T> {
     const n = new Set(set); n.has(val) ? n.delete(val) : n.add(val); return n
@@ -485,8 +467,16 @@ export default function FeedPage() {
     return Array.from(cats).sort()
   }, [news])
 
+  const allNewsSources = useMemo(() =>
+    Array.from(
+      news.reduce((m, n) => m.set(n.source, (m.get(n.source) ?? 0) + 1), new Map<string, number>())
+    ).sort((a, b) => b[1] - a[1]),
+  [news])
+
   const activeFilterCount =
-    activeSeverities.size + activeEventTypes.size + activeNewsCategories.size + (keywordFilterOn ? 1 : 0)
+    (!showEvents ? 1 : 0) + (!showNews ? 1 : 0) + (!showFieldReports ? 1 : 0) + (!showCommunityReports ? 1 : 0) +
+    activeSources.size + activeSeverities.size + activeEventTypes.size +
+    activeNewsSources.size + activeNewsCategories.size + (keywordFilterOn ? 1 : 0)
 
   const combined: FeedItem[] = useMemo(() => [
     ...events.map(e => ({ kind: 'event' as const, ...e })),
@@ -501,6 +491,8 @@ export default function FeedPage() {
   const filtered = useMemo(() => {
     const base = combined.filter(item => {
       if (item.kind === 'event') {
+        if (!showEvents) return false
+        if (activeSources.size > 0 && !activeSources.has(item.source)) return false
         if (activeSeverities.size > 0 && !activeSeverities.has(item.severity)) return false
         if (activeEventTypes.size > 0 && !activeEventTypes.has(item.event_type)) return false
         if (hasLocation && nearMe && user?.user_lat && user?.user_lon) {
@@ -510,7 +502,13 @@ export default function FeedPage() {
         }
       }
       if (item.kind === 'news') {
+        if (!showNews) return false
+        if (activeNewsSources.size > 0 && !activeNewsSources.has(item.source)) return false
         if (item.category && activeNewsCategories.size > 0 && !activeNewsCategories.has(item.category)) return false
+      }
+      if (item.kind === 'post') {
+        if (item.post_type === 'field_report' && !showFieldReports) return false
+        if (item.post_type === 'self_reported_news' && !showCommunityReports) return false
       }
       if (keywordFilterOn && savedKeywords.length > 0) {
         let text = ''
@@ -541,25 +539,35 @@ export default function FeedPage() {
       })
     }
     return base
-  }, [combined, activeSeverities, activeEventTypes, activeNewsCategories, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords, sortBy, searchText])
+  }, [combined, showEvents, showNews, showFieldReports, showCommunityReports, activeSources, activeSeverities, activeEventTypes, activeNewsCategories, activeNewsSources, nearMe, nearMeKm, hasLocation, user?.user_lat, user?.user_lon, keywordFilterOn, savedKeywords, sortBy, searchText])
 
   const severeCounts = events.filter(e => e.severity === 'Extreme' || e.severity === 'Severe').length
 
-  // Three columns instead of one merged list: split the shared filtered
-  // array back out by kind for independent rendering and pagination.
-  const filteredEvents = useMemo(() => filtered.filter(i => i.kind === 'event'), [filtered])
-  const filteredNews = useMemo(() => filtered.filter(i => i.kind === 'news'), [filtered])
-  const filteredReports = useMemo(() => filtered.filter(i => i.kind === 'post'), [filtered])
-
   const filterSignature = useMemo(() =>
-    [sortBy, [...activeSeverities].sort().join(), [...activeEventTypes].sort().join(),
+    [showEvents, showNews, showFieldReports, showCommunityReports, sortBy,
+     [...activeSources].sort().join(), [...activeSeverities].sort().join(),
+     [...activeEventTypes].sort().join(), [...activeNewsSources].sort().join(),
      [...activeNewsCategories].sort().join(), nearMe, nearMeKm, keywordFilterOn,
      savedKeywords.join(), searchText,
     ].join('|'),
-    [sortBy, activeSeverities, activeEventTypes, activeNewsCategories, nearMe, nearMeKm, keywordFilterOn, savedKeywords, searchText]
+    [showEvents, showNews, showFieldReports, showCommunityReports, sortBy, activeSources, activeSeverities, activeEventTypes, activeNewsSources, activeNewsCategories, nearMe, nearMeKm, keywordFilterOn, savedKeywords, searchText]
   )
 
-  useEffect(() => { setEventsShown(30); setNewsShown(30); setReportsShown(30) }, [filterSignature])
+  useEffect(() => { setDisplayCount(30) }, [filterSignature])
+
+  const hasMore = displayCount < filtered.length
+
+  useEffect(() => {
+    if (!hasMore) return
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setDisplayCount(n => n + 30) },
+      { rootMargin: '400px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, displayCount])
 
   async function saveKeywords(kws: string[]) {
     if (!user) return
@@ -587,10 +595,14 @@ export default function FeedPage() {
   }
 
   function resetFilters() {
+    setShowEvents(true); setShowNews(true)
+    setShowFieldReports(true); setShowCommunityReports(true)
     setNearMe(true)
+    setActiveSources(new Set())
     setActiveSeverities(new Set())
     setActiveEventTypes(new Set())
     setActiveNewsCategories(new Set())
+    setActiveNewsSources(new Set())
     setKeywordFilterOn(false)
     setSortBy('newest')
     setSearchText('')
@@ -600,6 +612,7 @@ export default function FeedPage() {
   const locationLabel = [user?.region_county, user?.region_state].filter(Boolean).join(', ')
 
   const visibleEventTypes = eventTypesExpanded ? eventTypes : eventTypes.slice(0, 6)
+  const visibleNewsSources = newsSourcesExpanded ? allNewsSources : allNewsSources.slice(0, 8)
 
   const filterContent = (
     <>
@@ -624,6 +637,34 @@ export default function FeedPage() {
             {d === 1 ? 'Today' : `${d}d`}
           </button>
         ))}
+      </div>
+
+      <SidebarLabel>Content</SidebarLabel>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        <FilterBtn active={showEvents} onClick={() => setShowEvents(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Events</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{events.length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showNews} onClick={() => setShowNews(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>News</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{news.length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showFieldReports} color="#F59E0B" onClick={() => setShowFieldReports(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Field Reports</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'field_report').length}</span>
+          </span>
+        </FilterBtn>
+        <FilterBtn active={showCommunityReports} color="#3B82F6" onClick={() => setShowCommunityReports(v => !v)}>
+          <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Community Reports</span>
+            <span style={{ color: 'var(--color-subtle)' }}>{posts.filter(p => p.post_type === 'self_reported_news').length}</span>
+          </span>
+        </FilterBtn>
       </div>
 
       {hasLocation && (
@@ -664,49 +705,90 @@ export default function FeedPage() {
         </>
       )}
 
-      <SidebarLabel active={activeSeverities.size > 0}>Severity (Events)</SidebarLabel>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-        {SEVERITY_LEVELS.map(s => {
-          const c = s === 'Extreme' || s === 'Severe' ? '#EF4444' : s === 'Moderate' ? '#F59E0B' : '#22C55E'
-          return (
-            <FilterBtn key={s} active={activeSeverities.has(s)} color={c} onClick={() => setActiveSeverities(set => toggle(set, s))}>
-              <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span>{s}</span>
-                <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.severity === s).length}</span>
-              </span>
-            </FilterBtn>
-          )
-        })}
-      </div>
-
-      {eventTypes.length > 0 && (
+      {showEvents && (
         <>
-          <SidebarLabel active={activeEventTypes.size > 0}>Event Types</SidebarLabel>
+          <SidebarLabel active={activeSeverities.size > 0}>Severity</SidebarLabel>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {visibleEventTypes.map(type => (
-              <FilterBtn key={type} active={activeEventTypes.has(type)} onClick={() => setActiveEventTypes(s => toggle(s, type))}>
+            {SEVERITY_LEVELS.map(s => {
+              const c = s === 'Extreme' || s === 'Severe' ? '#EF4444' : s === 'Moderate' ? '#F59E0B' : '#22C55E'
+              return (
+                <FilterBtn key={s} active={activeSeverities.has(s)} color={c} onClick={() => setActiveSeverities(set => toggle(set, s))}>
+                  <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span>{s}</span>
+                    <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.severity === s).length}</span>
+                  </span>
+                </FilterBtn>
+              )
+            })}
+          </div>
+
+          <SidebarLabel active={activeSources.size > 0}>Event Sources</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {SOURCE_FILTERS.map(src => (
+              <FilterBtn key={src} active={activeSources.has(src)} onClick={() => setActiveSources(s => toggle(s, src))}>
                 <span style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ textTransform: 'capitalize' }}>{type.replace(/_/g, ' ')}</span>
-                  <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.event_type === type).length}</span>
+                  <span>{SOURCE_LABEL[src]}</span>
+                  <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.source === src).length}</span>
                 </span>
               </FilterBtn>
             ))}
           </div>
-          {eventTypes.length > 6 && (
-            <button onClick={() => setEventTypesExpanded(v => !v)} style={{
+
+          {eventTypes.length > 0 && (
+            <>
+              <SidebarLabel active={activeEventTypes.size > 0}>Event Types</SidebarLabel>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {visibleEventTypes.map(type => (
+                  <FilterBtn key={type} active={activeEventTypes.has(type)} onClick={() => setActiveEventTypes(s => toggle(s, type))}>
+                    <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ textTransform: 'capitalize' }}>{type.replace(/_/g, ' ')}</span>
+                      <span style={{ color: 'var(--color-subtle)' }}>{events.filter(e => e.event_type === type).length}</span>
+                    </span>
+                  </FilterBtn>
+                ))}
+              </div>
+              {eventTypes.length > 6 && (
+                <button onClick={() => setEventTypesExpanded(v => !v)} style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '3px 10px',
+                  fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)',
+                  textAlign: 'left', width: '100%',
+                }}>
+                  {eventTypesExpanded ? 'show less' : `show ${eventTypes.length - 6} more`}
+                </button>
+              )}
+            </>
+          )}
+        </>
+      )}
+
+      {showNews && (
+        <>
+          <SidebarLabel active={activeNewsSources.size > 0}>News Sources</SidebarLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {visibleNewsSources.map(([src, count]) => (
+              <FilterBtn key={src} active={activeNewsSources.has(src)} onClick={() => setActiveNewsSources(s => toggle(s, src))}>
+                <span style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{src}</span>
+                  <span style={{ color: 'var(--color-subtle)' }}>{count}</span>
+                </span>
+              </FilterBtn>
+            ))}
+          </div>
+          {allNewsSources.length > 8 && (
+            <button onClick={() => setNewsSourcesExpanded(v => !v)} style={{
               background: 'none', border: 'none', cursor: 'pointer', padding: '3px 10px',
               fontSize: '10px', fontFamily: 'var(--font-mono)', color: 'var(--color-subtle)',
               textAlign: 'left', width: '100%',
             }}>
-              {eventTypesExpanded ? 'show less' : `show ${eventTypes.length - 6} more`}
+              {newsSourcesExpanded ? 'show less' : `show ${allNewsSources.length - 8} more`}
             </button>
           )}
         </>
       )}
 
-      {newsCategories.length > 0 && (
+      {showNews && newsCategories.length > 0 && (
         <>
-          <SidebarLabel active={activeNewsCategories.size > 0}>Category (News)</SidebarLabel>
+          <SidebarLabel active={activeNewsCategories.size > 0}>Category</SidebarLabel>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
             {newsCategories.map(cat => {
               const isActive = activeNewsCategories.has(cat)
@@ -806,7 +888,7 @@ export default function FeedPage() {
 
   return (
     <div style={{
-      maxWidth: '1600px', margin: '0 auto', padding: '28px 24px',
+      maxWidth: '1200px', margin: '0 auto', padding: '28px 24px',
       display: isMobile ? 'block' : 'grid',
       gridTemplateColumns: isMobile ? undefined : '1fr 220px',
       gap: isMobile ? undefined : '32px',
@@ -828,7 +910,7 @@ export default function FeedPage() {
             </span>
           )}
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', marginLeft: 'auto' }}>
-            {loading ? '...' : `${filtered.length} items · ${timePeriod === 1 ? 'today' : `${timePeriod}d`}`}
+            {loading ? '...' : `${Math.min(displayCount, filtered.length)} of ${filtered.length} · ${timePeriod === 1 ? 'today' : `${timePeriod}d`}`}
           </span>
           <div style={{ display: 'flex', gap: '4px' }}>
             <button
@@ -896,7 +978,20 @@ export default function FeedPage() {
 
         {newAlertBanner && (
           <button
-            onClick={() => { setNewAlertBanner(false); loadFeed() }}
+            onClick={() => {
+              setNewAlertBanner(false)
+              setLoading(true)
+              Promise.all([
+                fetch(`/api/events?sources=noaa,usgs,gdacs,epa&days=${timePeriod}`).then(r => r.json()),
+                fetch(`/api/news?days=${timePeriod}&limit=2000`).then(r => r.json()),
+                fetch(`/api/posts?limit=500`).then(r => r.json()),
+              ]).then(([evts, nws, psts]) => {
+                setEvents(Array.isArray(evts) ? evts : [])
+                setNews(Array.isArray(nws) ? nws : [])
+                setPosts(Array.isArray(psts) ? psts.filter((p: PostItem) => p.post_type === 'field_report' || p.post_type === 'self_reported_news') : [])
+                setLoading(false)
+              }).catch(() => setLoading(false))
+            }}
             style={{
               width: '100%', marginBottom: '10px', padding: '9px 16px',
               background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
@@ -905,11 +1000,11 @@ export default function FeedPage() {
               letterSpacing: '0.03em',
             }}
           >
-            New severe alert, click to refresh
+            New severe alert -- click to refresh
           </button>
         )}
 
-        <div style={{ position: 'relative', marginBottom: '16px' }}>
+        <div style={{ position: 'relative', marginBottom: '12px' }}>
           <input
             type="text"
             value={searchText}
@@ -939,59 +1034,32 @@ export default function FeedPage() {
           )}
         </div>
 
-        {/* Mobile: a tab per column instead of three side by side, no room for that on a phone */}
-        {isMobile && (
-          <div style={{ display: 'flex', gap: '4px', marginBottom: '14px' }}>
-            {([
-              ['events', 'Events', filteredEvents.length],
-              ['news', 'News', filteredNews.length],
-              ['reports', 'Reports', filteredReports.length],
-            ] as const).map(([key, label, count]) => (
-              <button
-                key={key}
-                onClick={() => setMobileColumn(key)}
-                style={{
-                  flex: 1, padding: '7px 0', borderRadius: '5px', cursor: 'pointer', fontSize: '12px',
-                  fontFamily: 'var(--font-display)', fontWeight: mobileColumn === key ? 700 : 400,
-                  border: `1px solid ${mobileColumn === key ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                  background: mobileColumn === key ? 'rgba(34,197,94,0.1)' : 'transparent',
-                  color: mobileColumn === key ? 'var(--color-accent)' : 'var(--color-muted)',
-                }}
-              >
-                {label} {count}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {isMobile ? (
-          <FeedColumn
-            items={mobileColumn === 'events' ? filteredEvents : mobileColumn === 'news' ? filteredNews : filteredReports}
-            shown={mobileColumn === 'events' ? eventsShown : mobileColumn === 'news' ? newsShown : reportsShown}
-            onShowMore={() => {
-              if (mobileColumn === 'events') setEventsShown(n => n + 30)
-              else if (mobileColumn === 'news') setNewsShown(n => n + 30)
-              else setReportsShown(n => n + 30)
-            }}
-            loading={loading}
-            emptyText="No items match the current filters"
-          />
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', alignItems: 'start' }}>
-            <div>
-              <ColumnHeader label="Events" count={filteredEvents.length} color="var(--color-danger)" />
-              <FeedColumn items={filteredEvents} shown={eventsShown} onShowMore={() => setEventsShown(n => n + 30)} loading={loading} emptyText="No events match" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {filtered.slice(0, displayCount).map(item =>
+            item.kind === 'event'
+              ? <EventCard key={`e-${item.id}`} item={item} />
+              : item.kind === 'post'
+                ? <PostCard key={`p-${item.id}`} item={item} />
+                : <NewsCard key={`n-${item.id}`} item={item} />
+          )}
+          {!loading && filtered.length === 0 && (
+            <div style={{ color: 'var(--color-muted)', textAlign: 'center', padding: '60px 0', fontFamily: 'var(--font-mono)', fontSize: '13px' }}>
+              No items match the current filters
             </div>
-            <div>
-              <ColumnHeader label="News" count={filteredNews.length} color="#3B82F6" />
-              <FeedColumn items={filteredNews} shown={newsShown} onShowMore={() => setNewsShown(n => n + 30)} loading={loading} emptyText="No news matches" />
+          )}
+          {hasMore && (
+            <div ref={sentinelRef} style={{ padding: '24px 0', textAlign: 'center' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', letterSpacing: '0.05em' }}>
+                loading more...
+              </span>
             </div>
-            <div>
-              <ColumnHeader label="Reports" count={filteredReports.length} color="#F59E0B" />
-              <FeedColumn items={filteredReports} shown={reportsShown} onShowMore={() => setReportsShown(n => n + 30)} loading={loading} emptyText="No reports match" />
+          )}
+          {!hasMore && filtered.length > 30 && !loading && (
+            <div style={{ padding: '24px 0', textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)', letterSpacing: '0.05em' }}>
+              all {filtered.length} items loaded
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Sidebar - desktop only */}
@@ -999,56 +1067,6 @@ export default function FeedPage() {
         <div style={{ position: 'sticky', top: '80px' }}>
           {filterContent}
         </div>
-      )}
-    </div>
-  )
-}
-
-function ColumnHeader({ label, count, color }: { label: string; count: number; color: string }) {
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '6px 2px', marginBottom: '8px', borderBottom: `2px solid ${color}`,
-    }}>
-      <span style={{ fontFamily: 'var(--font-display)', fontSize: '13px', fontWeight: 700, color: 'var(--color-text)' }}>{label}</span>
-      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--color-subtle)' }}>{count}</span>
-    </div>
-  )
-}
-
-function FeedColumn({ items, shown, onShowMore, loading, emptyText }: {
-  items: FeedItem[]
-  shown: number
-  onShowMore: () => void
-  loading: boolean
-  emptyText: string
-}) {
-  const visible = items.slice(0, shown)
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      {visible.map(item =>
-        item.kind === 'event'
-          ? <EventCard key={`e-${item.id}`} item={item} />
-          : item.kind === 'post'
-            ? <PostCard key={`p-${item.id}`} item={item} />
-            : <NewsCard key={`n-${item.id}`} item={item} />
-      )}
-      {!loading && items.length === 0 && (
-        <div style={{ color: 'var(--color-muted)', textAlign: 'center', padding: '40px 0', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-          {emptyText}
-        </div>
-      )}
-      {shown < items.length && (
-        <button
-          onClick={onShowMore}
-          style={{
-            padding: '8px 0', borderRadius: '6px', cursor: 'pointer', fontFamily: 'var(--font-mono)',
-            fontSize: '11px', color: 'var(--color-subtle)', background: 'transparent',
-            border: '1px solid var(--color-border)', letterSpacing: '0.05em',
-          }}
-        >
-          show {Math.min(30, items.length - shown)} more
-        </button>
       )}
     </div>
   )
