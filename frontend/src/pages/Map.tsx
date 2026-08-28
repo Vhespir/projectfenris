@@ -3,13 +3,8 @@ import { useLocation } from 'react-router-dom'
 import CesiumMap from '../components/CesiumMap'
 import type { DisasterEvent, AirTrafficFilters, AltitudeBand, FireTimeRange } from '../components/MapEventLayer'
 import { useIsMobile } from '../hooks/useIsMobile'
-
-const SOURCES = [
-  { key: 'usgs',  label: 'Seismic (USGS)' },
-  { key: 'gdacs', label: 'Global (GDACS)' },
-  { key: 'epa',   label: 'Air Quality (EPA)' },
-  { key: 'eonet', label: 'NASA EONET' },
-]
+import { useAuth } from '../context/AuthContext'
+import { fetchFeedSourceCatalog, subscribedSourceIds, sourceQueryValues, type FeedSourceCatalog } from '../utils/feedSources'
 
 const OVERLAYS = [
   { key: 'radar',   label: 'Radar' },
@@ -79,11 +74,32 @@ export default function MapPage() {
   const location = useLocation()
   const pendingFlyTo = (location.state as { flyTo?: { lat: number; lon: number } } | null)?.flyTo
 
+  const { user } = useAuth()
   const [events, setEvents] = useState<DisasterEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [activeFilters, setActiveFilters] = useState(new Set(['usgs', 'gdacs', 'epa', 'eonet']))
+  const [sourceCatalog, setSourceCatalog] = useState<FeedSourceCatalog>({ groups: [], defaultIds: [] })
+  const [filtersReady, setFiltersReady] = useState(false)
+  const [activeFilters, setActiveFilters] = useState(new Set<string>())
   const [activeOverlays, setActiveOverlays] = useState(new Set(['radar', 'alerts']))
+
+  // Same subscribed-sources list Settings manages, so the map shows the
+  // same sources as the feed by default: one subscription, everywhere.
+  // The toggle buttons below still let you flip sources on/off for this
+  // session on top of that baseline without touching the saved preference.
+  useEffect(() => {
+    fetchFeedSourceCatalog().then(catalog => {
+      setSourceCatalog(catalog)
+      const subscribed = subscribedSourceIds(user?.preferences, catalog)
+      setActiveFilters(new Set(sourceQueryValues(subscribed, catalog, 'event')))
+      setFiltersReady(true)
+    })
+  }, [user])
+
+  const SOURCES = sourceCatalog.groups
+    .flatMap(g => g.sources)
+    .filter(s => s.table === 'event')
+    .map(s => ({ key: s.value, label: s.label }))
 
   const [atFilters, setAtFilters] = useState<AirTrafficFilters>({ altitudeBand: 'all', emergencyOnly: false })
   const [atPanelOpen, setAtPanelOpen] = useState(false)
@@ -166,11 +182,17 @@ export default function MapPage() {
   }
 
   useEffect(() => {
-    fetch('/api/events?sources=usgs,gdacs,epa,eonet&limit=1000')
+    if (!filtersReady) return
+    const sources = [...activeFilters]
+    const url = sources.length
+      ? `/api/events?limit=1000&sources=${sources.map(encodeURIComponent).join(',')}`
+      : null
+    if (!url) { setEvents([]); setLoading(false); return }
+    fetch(url)
       .then(r => r.json())
       .then(data => { setEvents(data); setLoading(false) })
       .catch(() => { setError('Failed to load event data'); setLoading(false) })
-  }, [])
+  }, [filtersReady, activeFilters])
 
   function toggleFilter(key: string) {
     setActiveFilters(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })

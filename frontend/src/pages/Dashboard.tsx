@@ -9,6 +9,7 @@ import { EventLayer, RadarLayer, WeatherAlertLayer, type DisasterEvent } from '.
 import { useAuth } from '../context/AuthContext'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useContextDrawer } from '../context/ContextDrawerContext'
+import { fetchFeedSourceCatalog, subscribedSourceIds, sourceQueryValues, type FeedSourceCatalog } from '../utils/feedSources'
 
 const ResponsiveGridLayout = WidthProvider(Responsive)
 
@@ -1635,6 +1636,9 @@ export default function Dashboard() {
   const [news, setNews] = useState<NewsItem[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [loading, setLoading] = useState(true)
+  const [sourceCatalog, setSourceCatalog] = useState<FeedSourceCatalog>({ groups: [], defaultIds: [] })
+
+  useEffect(() => { fetchFeedSourceCatalog().then(setSourceCatalog) }, [])
 
   const [widgets, setWidgets] = useState<PlacedWidget[]>(DEFAULT_WIDGETS)
   const [layout, setLayout] = useState<GridLayoutItem[]>(DEFAULT_LAYOUT)
@@ -1648,10 +1652,28 @@ export default function Dashboard() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   useEffect(() => {
+    // Until the catalog loads, fetch unfiltered rather than flashing an
+    // empty feed; once it's here, only the subscribed sources are asked
+    // for at all, not fetched-then-hidden client-side.
+    const catalogReady = sourceCatalog.groups.length > 0
+    const subscribed = subscribedSourceIds(user?.preferences, sourceCatalog)
+    const eventSources = sourceQueryValues(subscribed, sourceCatalog, 'event')
+    const newsSources = sourceQueryValues(subscribed, sourceCatalog, 'news')
+    // catalogReady + zero subscribed sources is a deliberate "I want
+    // nothing" choice, not "unfiltered": fetch a URL that can't match
+    // anything rather than silently ignoring the empty filter and showing
+    // everything (which is what an empty ?sources= param would do server-side).
+    const eventsUrl = !catalogReady ? '/api/events?limit=3000'
+      : eventSources.length ? `/api/events?limit=3000&sources=${eventSources.map(encodeURIComponent).join(',')}`
+      : null
+    const newsUrl = !catalogReady ? '/api/news?limit=100'
+      : newsSources.length ? `/api/news?limit=100&source=${newsSources.map(encodeURIComponent).join(',')}`
+      : null
+
     async function fetchData() {
       const [evs, nws, psts] = await Promise.all([
-        fetch('/api/events?limit=3000').then(r => r.json()).catch(() => []),
-        fetch('/api/news?limit=100').then(r => r.json()).catch(() => []),
+        eventsUrl ? fetch(eventsUrl).then(r => r.json()).catch(() => []) : Promise.resolve([]),
+        newsUrl ? fetch(newsUrl).then(r => r.json()).catch(() => []) : Promise.resolve([]),
         fetch('/api/posts?limit=50').then(r => r.json()).catch(() => []),
       ])
       setEvents(Array.isArray(evs) ? evs : [])
@@ -1662,7 +1684,7 @@ export default function Dashboard() {
     fetchData()
     const id = setInterval(fetchData, 5 * 60 * 1000)
     return () => clearInterval(id)
-  }, [])
+  }, [sourceCatalog, user])
 
   useEffect(() => {
     if (!user || hydratedRef.current) return
