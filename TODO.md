@@ -59,6 +59,53 @@ per-state effort, not a single build.
   permission granted, but has a real per-message cost (Twilio-class
   pricing). Worth it only if push turns out not to be enough.
 
+## New tool ideas (bag, not prioritized, none started)
+
+Standalone, deliberately not dependent on new infrastructure like
+geofencing or an alert-to-tool rules engine (see below), just tools that
+could sit next to Inventory and Garden on their own.
+
+- **Skills tracker**: the one currently being developed further, see
+  below.
+- **Drill/scenario planner**: pick a scenario (power outage, evacuation,
+  shelter-in-place), get a checklist to actually run it with your
+  household, log how it went.
+- **Communication plan builder**: family meeting points, out-of-area
+  contact, agreed radio channels/code words, exports as a printable card.
+- **Important documents checklist**: not a document vault (real liability
+  to store the actual documents), just tracks whether you have copies, a
+  fireproof bag, a digital backup.
+- **Long-term-storage cooking reference**: what to actually make from
+  wheat berries, powdered milk, canned goods. Could fold into the
+  download-library idea instead of being its own tool.
+- **Local resource directory**: crowdsourced list of water sources, ham
+  clubs, co-ops, mutual aid groups, same pattern as the existing guides.
+- **"Mark yourself safe" check-in**: a button during a declared regional
+  event, visible to followers. Precedent: Facebook Safety Check. Pure
+  social feature, no map/alert engine needed.
+- **Barter/skill exchange board**: "I have X skill" / "I'd trade X for Y"
+  posts, same pattern as the existing community post system.
+
+## Alert-to-tool linking (explicitly deferred, revisit only if it becomes clearly needed)
+
+Idea from an external brainstorm: geofence individual assets (a specific
+inventory kit, a specific garden bed) rather than just the user's home
+region, so an alert can say "this wildfire is near your garden bed"
+specifically. Deliberately not pursuing this now: `inventory_kits` and
+`garden_beds` only have a free-text `location_label`, no real
+coordinates, and per-asset geofencing only adds value for someone whose
+gear/garden is in a genuinely different place than their registered home
+address. For most users everything's at one address, so "near your home"
+(which the alert system already does) already covers it. Revisit if it
+turns out people are actually keeping caches/plots elsewhere.
+
+What's already true and doesn't need building: the "hazard_events" table
+this idea assumed didn't exist yet is just the existing `disaster_events`
+table (already normalized across every source, PostGIS geometry,
+severity, expiry), and the "rules engine" is already `worker/lib/
+alerts.js`'s proximity + severity matching, which already delivers
+through email and Web Push with deep links.
+
 ## Explicitly declined / out of scope for now
 
 - Native long-form video hosting (creator content): real storage/compute
