@@ -218,6 +218,7 @@ interface LiveFeedRow {
   centroid?: [number, number] | null
   url?: string | null
   postId?: number
+  source?: string
 }
 
 function LiveFeedContent({ data, config, onSetConfig }: {
@@ -227,7 +228,7 @@ function LiveFeedContent({ data, config, onSetConfig }: {
 }) {
   const { open: openDrawer } = useContextDrawer()
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, login } = useAuth()
   // A fixed 10 regardless of how tall the widget was made meant enlarging it
   // just added blank space below the same 10 rows. Show up to 20 instead so
   // a taller widget actually has more to show; the panel's own scroll
@@ -243,6 +244,29 @@ function LiveFeedContent({ data, config, onSetConfig }: {
   const configOpen = config?._open === true
   const userLoc: [number, number] | null =
     user?.user_lat != null && user?.user_lon != null ? [user.user_lat, user.user_lon] : null
+
+  // For the inline "mute this source" action on each row: a real RSS
+  // reader lets you unsubscribe right from an item, not just from a
+  // settings screen somewhere else.
+  const [sourceCatalog, setSourceCatalog] = useState<FeedSourceCatalog>({ groups: [], defaultIds: [] })
+  useEffect(() => { fetchFeedSourceCatalog().then(setSourceCatalog) }, [])
+
+  async function muteSource(row: LiveFeedRow) {
+    if (!user || !row.source || sourceCatalog.groups.length === 0) return
+    const all = sourceCatalog.groups.flatMap(g => g.sources)
+    const match = all.find(s => s.table === (row.kind === 'event' ? 'event' : 'news') && s.value === row.source)
+    if (!match) return
+    const current = subscribedSourceIds(user.preferences, sourceCatalog)
+    const next = current.filter(id => id !== match.id)
+    const res = await fetch('/api/users/me', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferences: { feedSources: next } }),
+    })
+    if (res.ok) {
+      login({ ...user, preferences: { ...user.preferences, feedSources: next } })
+    }
+  }
 
   const rows = useMemo<LiveFeedRow[]>(() => {
     const out: LiveFeedRow[] = []
@@ -262,7 +286,7 @@ function LiveFeedContent({ data, config, onSetConfig }: {
           badge: `${e.severity.toUpperCase()} · ${e.event_type.replace(/_/g, ' ')}`,
           color: SEV_COLOR[e.severity] ?? '#71717A',
           timeIso: e.fetched_at, slug: e.slug, discussionCount: e.discussion_count,
-          centroid: eventCentroid(e.geometry),
+          centroid: eventCentroid(e.geometry), source: e.source,
         })
       }
     }
@@ -272,6 +296,7 @@ function LiveFeedContent({ data, config, onSetConfig }: {
           kind: 'news', key: `n-${n.id}`, title: n.title,
           badge: n.source, color: '#3B82F6',
           timeIso: n.published_at, slug: n.slug, discussionCount: n.discussion_count, url: n.url,
+          source: n.source,
         })
       }
     }
@@ -367,7 +392,7 @@ function LiveFeedContent({ data, config, onSetConfig }: {
               <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--color-text)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.title}</span>
               {row.timeIso && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', flexShrink: 0 }}>{timeAgo(row.timeIso)}</span>}
             </div>
-            {(row.centroid || row.slug) && (
+            {(row.centroid || row.slug || row.source) && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '5px' }}>
                 {row.centroid && (
                   <button
@@ -383,6 +408,15 @@ function LiveFeedContent({ data, config, onSetConfig }: {
                     style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.04em', padding: 0 }}
                   >
                     {row.discussionCount ? `${row.discussionCount} discussion${row.discussionCount !== 1 ? 's' : ''}` : 'Discuss'}
+                  </button>
+                )}
+                {row.source && (
+                  <button
+                    onClick={e => { e.stopPropagation(); muteSource(row) }}
+                    title={`Unsubscribe from ${row.source} without leaving the feed`}
+                    style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--color-subtle)', letterSpacing: '0.04em', padding: 0 }}
+                  >
+                    Mute {row.source}
                   </button>
                 )}
               </div>
